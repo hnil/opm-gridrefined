@@ -59,6 +59,7 @@ list(APPEND MAIN_SOURCE_FILES
   opm/grid/cpgrid/Intersection.cpp
   opm/grid/cpgrid/Iterators.cpp
   opm/grid/cpgrid/LgrOutputHelpers.cpp
+  opm/grid/cpgrid/refinement/RefinementBuilder.cpp
   opm/grid/cpgrid/PartitionTypeIndicator.cpp
   opm/grid/cpgrid/processEclipseFormat.cpp
   opm/grid/grid_equal.cpp
@@ -79,6 +80,7 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/entityrep_test.cpp
   tests/cpgrid/facetag_test.cpp
   tests/cpgrid/geometry_test.cpp
+  tests/cpgrid/refinement_seam_test.cpp
   tests/cpgrid/grid_nnc.cpp
   tests/cpgrid/grid_pinch.cpp
   tests/cpgrid/orientedentitytable_test.cpp
@@ -188,6 +190,8 @@ list(APPEND PUBLIC_HEADER_FILES
   opm/grid/cpgrid/Iterators.hpp
   opm/grid/cpgrid/LevelCartesianIndexMapper.hpp
   opm/grid/cpgrid/LgrOutputHelpers.hpp
+  opm/grid/cpgrid/refinement/RefinementBuilder.hpp
+  opm/grid/cpgrid/refinement/RefinementRequest.hpp
   opm/grid/cpgrid/OrientedEntityTable.hpp
   opm/grid/cpgrid/PartitionIteratorRule.hpp
   opm/grid/cpgrid/PartitionTypeIndicator.hpp
