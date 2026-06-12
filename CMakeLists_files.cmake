@@ -59,7 +59,9 @@ list(APPEND MAIN_SOURCE_FILES
   opm/grid/cpgrid/Intersection.cpp
   opm/grid/cpgrid/Iterators.cpp
   opm/grid/cpgrid/LgrOutputHelpers.cpp
+  opm/grid/cpgrid/refinement/ConformingBlockBuilder.cpp
   opm/grid/cpgrid/refinement/GrdeclRefinement.cpp
+  opm/grid/cpgrid/refinement/LeafGridAssembler.cpp
   opm/grid/cpgrid/refinement/GridStateWriter.cpp
   opm/grid/cpgrid/refinement/LevelGridAssembler.cpp
   opm/grid/cpgrid/refinement/RefinementBuilder.cpp
@@ -86,6 +88,7 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/refinement_seam_test.cpp
   tests/cpgrid/grdecl_refinement_test.cpp
   tests/cpgrid/level_grid_assembler_test.cpp
+  tests/cpgrid/conforming_builder_test.cpp
   tests/cpgrid/grid_nnc.cpp
   tests/cpgrid/grid_pinch.cpp
   tests/cpgrid/orientedentitytable_test.cpp
@@ -195,7 +198,9 @@ list(APPEND PUBLIC_HEADER_FILES
   opm/grid/cpgrid/Iterators.hpp
   opm/grid/cpgrid/LevelCartesianIndexMapper.hpp
   opm/grid/cpgrid/LgrOutputHelpers.hpp
+  opm/grid/cpgrid/refinement/ConformingBlockBuilder.hpp
   opm/grid/cpgrid/refinement/GrdeclRefinement.hpp
+  opm/grid/cpgrid/refinement/LeafGridAssembler.hpp
   opm/grid/cpgrid/refinement/GridStateWriter.hpp
   opm/grid/cpgrid/refinement/LevelGridAssembler.hpp
   opm/grid/cpgrid/refinement/RefinementBuilder.hpp
