@@ -90,6 +90,7 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/level_grid_assembler_test.cpp
   tests/cpgrid/conforming_builder_test.cpp
   tests/cpgrid/refined_structure_comparison_test.cpp
+  tests/cpgrid/partition_cell_groups_test.cpp
   tests/cpgrid/grid_nnc.cpp
   tests/cpgrid/grid_pinch.cpp
   tests/cpgrid/orientedentitytable_test.cpp
