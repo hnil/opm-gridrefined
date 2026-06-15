@@ -61,6 +61,7 @@ list(APPEND MAIN_SOURCE_FILES
   opm/grid/cpgrid/LgrOutputHelpers.cpp
   opm/grid/cpgrid/refinement/ConformingBlockBuilder.cpp
   opm/grid/cpgrid/refinement/EdgeConformal.cpp
+  opm/grid/cpgrid/refinement/FaultedBoundaryFaces.cpp
   opm/grid/cpgrid/refinement/GrdeclRefinement.cpp
   opm/grid/cpgrid/refinement/LeafGridAssembler.cpp
   opm/grid/cpgrid/refinement/GridStateWriter.cpp
@@ -90,6 +91,7 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/grdecl_refinement_test.cpp
   tests/cpgrid/level_grid_assembler_test.cpp
   tests/cpgrid/conforming_builder_test.cpp
+  tests/cpgrid/faulted_boundary_test.cpp
   tests/cpgrid/edge_conformal_refinement_test.cpp
   tests/cpgrid/refined_structure_comparison_test.cpp
   tests/cpgrid/partition_cell_groups_test.cpp
@@ -205,6 +207,7 @@ list(APPEND PUBLIC_HEADER_FILES
   opm/grid/cpgrid/LgrOutputHelpers.hpp
   opm/grid/cpgrid/refinement/ConformingBlockBuilder.hpp
   opm/grid/cpgrid/refinement/EdgeConformal.hpp
+  opm/grid/cpgrid/refinement/FaultedBoundaryFaces.hpp
   opm/grid/cpgrid/refinement/GrdeclRefinement.hpp
   opm/grid/cpgrid/refinement/LeafGridAssembler.hpp
   opm/grid/cpgrid/refinement/GridStateWriter.hpp
