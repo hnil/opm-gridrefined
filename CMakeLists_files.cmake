@@ -115,6 +115,7 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/level_grid_assembler_test.cpp
   tests/cpgrid/conforming_builder_test.cpp
   tests/cpgrid/adaptive_cpgrid_test.cpp
+  tests/cpgrid/adaptive_cpgrid_bench.cpp
   tests/cpgrid/faulted_boundary_test.cpp
   tests/cpgrid/edge_conformal_refinement_test.cpp
   tests/cpgrid/refined_structure_comparison_test.cpp
