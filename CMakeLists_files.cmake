@@ -58,6 +58,7 @@ list(APPEND MAIN_SOURCE_FILES
   opm/grid/cpgrid/Indexsets.cpp
   opm/grid/cpgrid/Intersection.cpp
   opm/grid/cpgrid/Iterators.cpp
+  opm/grid/cpgrid/AdaptiveCpGrid.cpp
   opm/grid/cpgrid/LgrOutputHelpers.cpp
   opm/grid/cpgrid/refinement/ConformingBlockBuilder.cpp
   opm/grid/cpgrid/refinement/EdgeConformal.cpp
@@ -91,6 +92,7 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/grdecl_refinement_test.cpp
   tests/cpgrid/level_grid_assembler_test.cpp
   tests/cpgrid/conforming_builder_test.cpp
+  tests/cpgrid/adaptive_cpgrid_test.cpp
   tests/cpgrid/faulted_boundary_test.cpp
   tests/cpgrid/edge_conformal_refinement_test.cpp
   tests/cpgrid/refined_structure_comparison_test.cpp
@@ -202,6 +204,7 @@ list(APPEND PUBLIC_HEADER_FILES
   opm/grid/cpgrid/GridHelpers.hpp
   opm/grid/cpgrid/Indexsets.hpp
   opm/grid/cpgrid/Intersection.hpp
+  opm/grid/cpgrid/AdaptiveCpGrid.hpp
   opm/grid/cpgrid/Iterators.hpp
   opm/grid/cpgrid/LevelCartesianIndexMapper.hpp
   opm/grid/cpgrid/LgrOutputHelpers.hpp
