@@ -59,6 +59,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdlib>
 #include <fstream>
 #include <initializer_list>
 #include <iostream>
@@ -355,7 +356,14 @@ namespace cpgrid
         // When the deck requests LGRs, retain the (post-MINPV) corner-point
         // description: the refinement builder resamples it, and the grid
         // does not otherwise keep COORD/ZCORN (DESIGN-builder.md D4).
-        if (ecl_state && ecl_state->getLgrs().size() > 0) {
+        //
+        // The opt-in adaptive-refinement demonstration (OPM_ADAPTIVE_LGR) refines
+        // a CARFIN-less deck *after* construction; it needs the same retained
+        // input so the post-construction refinement reuses the identical
+        // (sanitized) geometry + builder as the static path. Gated on the env var
+        // so a normal (non-LGR, non-adaptive) run is byte-for-byte unchanged.
+        if (ecl_state && (ecl_state->getLgrs().size() > 0
+                          || std::getenv("OPM_ADAPTIVE_LGR") != nullptr)) {
             auto retained = std::make_shared<Opm::Refinement::RetainedCornerPointInput>();
             retained->dims = { static_cast<int>(ecl_grid.getNX()),
                                static_cast<int>(ecl_grid.getNY()),
