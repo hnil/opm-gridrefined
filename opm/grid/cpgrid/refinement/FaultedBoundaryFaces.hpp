@@ -35,6 +35,12 @@ struct BoundaryConnection
     int coarseNeighborCart{-1};      ///< parent Cartesian index of the coarse
                                      ///< neighbour, or -1 if this part of the box
                                      ///< boundary faces the domain (fault scarp)
+    std::array<int,3> coarseNeighborSub{}; ///< sub-position (0..cellsPerDim-1) of the
+                                     ///< neighbour cell within its parent column, in
+                                     ///< this box's refined frame. Valid when
+                                     ///< coarseNeighborCart >= 0; lets the caller map
+                                     ///< the neighbour to a refined child cell when it
+                                     ///< is itself refined (box<->box faulted interface).
     std::vector<std::array<double,3>> faceNodes; ///< face corner coordinates
 };
 
