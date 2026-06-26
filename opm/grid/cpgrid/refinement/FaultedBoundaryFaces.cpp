@@ -151,17 +151,26 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
         }
 
         int coarseCart = -1; // domain boundary part of the box boundary face
+        std::array<int,3> coarseSub{};
         if (otherSlot >= 0) {
-            const std::array<int,3> op = parentOfMini(latticeOf(otherSlot));
+            const std::array<int,3> oL = latticeOf(otherSlot);
+            const std::array<int,3> op = parentOfMini(oL);
             if (inBox(op)) {
                 continue; // an internal box face, not a boundary face
             }
             coarseCart = op[0] + parentDims[0]*op[1] + parentDims[0]*parentDims[1]*op[2];
+            // Sub-position of the neighbour cell within its parent column (this
+            // box's refined frame); identifies the neighbour's refined child when
+            // it is itself refined.
+            for (int d = 0; d < 3; ++d) {
+                coarseSub[d] = oL[d] % cellsPerDim[d];
+            }
         }
 
         BoundaryConnection bc;
         bc.boxCell = boxFrame;
         bc.coarseNeighborCart = coarseCart;
+        bc.coarseNeighborSub = coarseSub;
         for (unsigned n = out.face_node_ptr[face]; n < out.face_node_ptr[face + 1]; ++n) {
             const int node = out.face_nodes[n];
             bc.faceNodes.push_back({ out.node_coordinates[3*node],
