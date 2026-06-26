@@ -534,6 +534,140 @@ BOOST_AUTO_TEST_CASE(faceSharingNonMatchingSubdivisionsThrow)
     BOOST_CHECK_EQUAL(grid.maxLevel(), 0);
 }
 
+// Worst-cell closure: max over leaf cells of |sum of area-weighted outward
+// normals|. Zero iff every cell is closed (a necessary condition for a conformal
+// leaf with no unmatched/hanging faces).
+double maxClosure(const Dune::CpGrid& grid)
+{
+    double worst = 0.0;
+    for (const auto& e : Dune::elements(grid.leafGridView())) {
+        Dune::FieldVector<double,3> closure(0.0);
+        for (const auto& is : Dune::intersections(grid.leafGridView(), e)) {
+            auto n = is.centerUnitOuterNormal();
+            n *= is.geometry().volume();
+            closure += n;
+        }
+        worst = std::max(worst, closure.two_norm());
+    }
+    return worst;
+}
+
+// Every interior face is seen from both sides (a hanging/unmatched face would be
+// seen once). Returns the count of leaf cells touched, for a sanity assertion.
+void checkEveryInteriorFaceTwoSided(const Dune::CpGrid& grid)
+{
+    std::map<std::pair<int,int>, int> pairCount;
+    for (const auto& element : Dune::elements(grid.leafGridView())) {
+        for (const auto& is : Dune::intersections(grid.leafGridView(), element)) {
+            if (!is.neighbor()) {
+                continue;
+            }
+            const int in = is.inside().index();
+            const int out = is.outside().index();
+            pairCount[{std::min(in, out), std::max(in, out)}] += 1;
+        }
+    }
+    for (const auto& [cells, count] : pairCount) {
+        BOOST_CHECK_EQUAL(count, 2);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A2 compatible sub-face mosaic (LGR_GAPS A2): two boxes meeting on a shared
+// face with DIFFERENT but compatible in-face subdivisions (one a multiple of the
+// other). The coarser side's interface cells become >6-face hexes tiled by the
+// finer side's sub-faces. Implemented in assembleLeafGrid; these lock it in.
+// ---------------------------------------------------------------------------
+
+// STACKED pair (shared horizontal face): in-face directions I,J. Box LO is x4 in
+// BOTH I and J, box HI is x2 (compatible 4-vs-2 in both). This mirrors the
+// TLGR_VSTACK_HCOMPAT flow deck (TOP 4x4x2 over BOT 2x2x2). A horizontal
+// interface never carries a fault, so this is the pure mosaic case.
+BOOST_AUTO_TEST_CASE(stackedCompatibleInFaceMosaicBuilds)
+{
+    auto parent = makeVerticalPillarGrid({2, 2, 2}, [](int, int, int k_) {
+        return 2.0*(cellOf(k_) + sideOf(k_));
+    });
+    Dune::CpGrid grid;
+    auto raw = parent.raw();
+    grid.processEclipseFormat(raw, false);
+    const double volumeBefore = totalVolume(grid);
+
+    BuilderGuard guard(std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+        parent.dims, parent.coord, parent.zcorn, parent.actnum));
+
+    // Lower slab k in [0,1): x4 in I,J, x2 in K. Upper slab k in [1,2): x2 all.
+    grid.addLgrsUpdateLeafView(
+        {{4,4,2}, {2,2,2}}, {{0,0,0}, {0,0,1}}, {{2,2,1}, {2,2,2}}, {"LO", "HI"});
+
+    BOOST_REQUIRE_EQUAL(grid.maxLevel(), 2);
+    // LO: 4 parents x (4*4*2)=32 -> 128. HI: 4 parents x (2*2*2)=8 -> 32.
+    BOOST_CHECK_EQUAL(grid.size(0), 128 + 32);
+    BOOST_CHECK_CLOSE(totalVolume(grid), volumeBefore, 1e-8);
+    BOOST_CHECK_SMALL(maxClosure(grid), 1e-9);          // every cell closed
+    checkEveryInteriorFaceTwoSided(grid);               // no hanging faces
+
+    // The interface couples the two boxes: x4-vs-x2 in I and J -> each coarser
+    // bottom cell on the HI side is met by 2x2 = 4 finer faces. Count
+    // finer->coarser connections across the k=0/k=1 parent boundary.
+    int crossConnections = 0;
+    const auto& dims = grid.logicalCartesianSize();
+    for (const auto& element : Dune::elements(grid.leafGridView())) {
+        for (const auto& is : Dune::intersections(grid.leafGridView(), element)) {
+            if (!is.neighbor() || !is.inside().hasFather() || !is.outside().hasFather()) {
+                continue;
+            }
+            const int kin  = grid.globalCell()[is.inside().index()]  / (dims[0]*dims[1]);
+            const int kout = grid.globalCell()[is.outside().index()] / (dims[0]*dims[1]);
+            if (kin != kout) {
+                ++crossConnections;
+            }
+        }
+    }
+    // LO top layer is 8x8 (I,J) = 64 sub-faces, each a connection, counted from
+    // both sides.
+    BOOST_CHECK_EQUAL(crossConnections, 64 * 2);
+
+    // No coincident-distinct vertices (shared-face corners merged across boxes).
+    std::set<std::array<double,3>> coords;
+    int vertexCount = 0;
+    for (const auto& vertex : Dune::vertices(grid.leafGridView())) {
+        const auto& c = vertex.geometry().center();
+        coords.insert({c[0], c[1], c[2]});
+        ++vertexCount;
+    }
+    BOOST_CHECK_EQUAL(coords.size(), static_cast<std::size_t>(vertexCount));
+}
+
+// SIDE-BY-SIDE pair (shared vertical face), no fault: in-face directions J,K.
+// Box A is x4 in K, box B is x2 in K (compatible); equal in J. Confirms the
+// mosaic also works on a vertical interface when there is no fault.
+BOOST_AUTO_TEST_CASE(sideBySideCompatibleInFaceMosaicBuilds)
+{
+    auto parent = makeVerticalPillarGrid({2, 2, 2}, [](int, int, int k_) {
+        return 2.0*(cellOf(k_) + sideOf(k_));
+    });
+    Dune::CpGrid grid;
+    auto raw = parent.raw();
+    grid.processEclipseFormat(raw, false);
+    const double volumeBefore = totalVolume(grid);
+
+    BuilderGuard guard(std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+        parent.dims, parent.coord, parent.zcorn, parent.actnum));
+
+    // Box A i in [0,1): x4 in K, x2 in I,J. Box B i in [1,2): x2 all. Shared i=1
+    // vertical face; in-face J equal, in-face K differs 4 vs 2.
+    grid.addLgrsUpdateLeafView(
+        {{2,2,4}, {2,2,2}}, {{0,0,0}, {1,0,0}}, {{1,2,2}, {2,2,2}}, {"A", "B"});
+
+    BOOST_REQUIRE_EQUAL(grid.maxLevel(), 2);
+    // A: 4 parents x (2*2*4)=16 -> 64. B: 4 parents x 8 -> 32.
+    BOOST_CHECK_EQUAL(grid.size(0), 64 + 32);
+    BOOST_CHECK_CLOSE(totalVolume(grid), volumeBefore, 1e-8);
+    BOOST_CHECK_SMALL(maxClosure(grid), 1e-9);
+    checkEveryInteriorFaceTwoSided(grid);
+}
+
 // Nested LGR (a box whose parent is another LGR). The level grids are built
 // over their parent (Phase A/B of docs/NESTED_LGR_PLAN.md), but the recursive
 // leaf stitching (Phase C) is not implemented yet, so the build is expected to

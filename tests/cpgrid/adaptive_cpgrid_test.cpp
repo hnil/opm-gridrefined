@@ -324,6 +324,62 @@ BOOST_AUTO_TEST_CASE(reAdaptRefinesUnion)
     checkSameLeaf(adaptive.grid(), *reference);
 }
 
+// Two boxes stacked on top of each other (touching in K) with DIFFERENT vertical
+// (K) refinement but the SAME lateral (I,J) refinement build fine: the shared
+// face lies in the I-J plane, so only the in-face (I,J) subdivisions must match;
+// the perpendicular touch direction (K) is unconstrained. The merge keeps the two
+// different-factor slabs as two boxes, and the builder accepts the K-only
+// difference. (This is the adaptive analogue of the TLGR_VSTACK_42 deck.)
+BOOST_AUTO_TEST_CASE(verticalStackDifferentKMatchesStatic)
+{
+    const std::array<int,3> dims{2, 2, 4};
+    auto g = sampleGrid(dims);
+
+    // Lower slab k in [0,2): x4 in K; upper slab k in [2,4): x2 in K. Same I,J (x2).
+    // Box order follows the merge's factor-sorted order ({2,2,2} before {2,2,4}) so
+    // the two LGR *levels* line up with the adaptive grid's (the leaf is identical
+    // either way; checkSameLeaf compares level-by-level).
+    auto reference = staticRefined(g,
+        {{2,2,2}, {2,2,4}},
+        {{0,0,2}, {0,0,0}},
+        {{2,2,4}, {2,2,2}},
+        {"VHI", "VLO"});
+
+    Opm::AdaptiveCpGrid adaptive(dims, g.coord, g.zcorn, g.actnum);
+    adaptive.markBox({0,0,0}, {2,2,2}, {2,2,4});   // lower slab, fine in K
+    adaptive.markBox({0,0,2}, {2,2,4}, {2,2,2});   // upper slab, coarse in K
+    adaptive.adapt();
+
+    BOOST_CHECK(adaptive.refined());
+    checkConformalLeaf(adaptive.grid());
+    checkSameLeaf(adaptive.grid(), *reference);
+}
+
+// A2 compatible sub-face mosaic through the adaptive mark API: marking two
+// stacked regions with DIFFERENT but compatible in-face (I) factors -- x4 over
+// x2 -- builds a conformal leaf via the coarser-side sub-face mosaic. A
+// horizontal (K) interface carries no fault, so this is the pure mosaic case.
+BOOST_AUTO_TEST_CASE(adaptiveStackedCompatibleInFaceMosaic)
+{
+    const std::array<int,3> dims{2, 2, 2};
+    auto flat = [](int, int, int k_) { return 1.0 * (cellOf(k_) + sideOf(k_)); };
+    auto g = makeVerticalPillarGrid(dims, flat);
+
+    // Static reference: the same two stacked boxes refined at construction. The
+    // merge orders boxes by factor ({2,2,2} before {4,2,2}), so list HI first.
+    auto reference = staticRefined(g,
+        {{2,2,2}, {4,2,2}}, {{0,0,1}, {0,0,0}}, {{2,2,2}, {2,2,1}}, {"HI", "LO"});
+
+    Opm::AdaptiveCpGrid adaptive(dims, g.coord, g.zcorn, g.actnum);
+    adaptive.markBox({0,0,0}, {2,2,1}, {4,2,2});   // lower slab, fine in I
+    adaptive.markBox({0,0,1}, {2,2,2}, {2,2,2});   // upper slab, coarse in I
+    adaptive.adapt();
+
+    BOOST_CHECK(adaptive.refined());
+    checkConformalLeaf(adaptive.grid());
+    checkSameLeaf(adaptive.grid(), *reference);     // == refined-at-construction
+}
+
 // No marks => adapt() is a no-op and the grid stays coarse.
 BOOST_AUTO_TEST_CASE(adaptWithoutMarksIsNoop)
 {

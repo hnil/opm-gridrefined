@@ -23,7 +23,7 @@ useful as an end-to-end smoke test.
 | # | Gap | Where it throws | Deck |
 |---|-----|-----------------|------|
 | A1 | **Nested LGR** (an LGR refined inside another LGR, `parentGridName != GLOBAL`) — **partially landed 2026-06-16**, see `docs/NESTED_LGR_PLAN.md`. Phase A (simulator parent pass-through + topological ordering) and Phase B (build each nested level grid over its parent LGR) are done and the GLOBAL path is byte-identical; the recursive **leaf** assembly (Phase C) and parallel nested (Phase D) remain, so the builder now throws a precise *"Nested LGR leaf assembly is not implemented"* after building the nested level grids (was an immediate throw at `ConformingBlockBuilder.cpp`). | `ConformingBlockBuilder.cpp` (post-level-grid Phase-C guard) | `opm-tests/lgr/SPE1CASE1_CARFIN1_NESTED.DATA` (CARFIN inside `LGR1`); unit tests `nestedRefinementReachesLeafBoundary`, `nestedChildBeforeParentThrows`. Master supports it. |
-| A2 | **Touching boxes, different in-face subdivisions** (different `cellsPerDim` in a *shared/overlap* direction). The builder requires the in-face subdivisions to be **equal**; a different-but-*compatible* (multiple) factor is **also** rejected, even though it is geometrically conformalizable — see the note below. | `ConformingBlockBuilder.cpp` (the per-direction `cellsPerDim` check) | unit test `faceSharingNonMatchingSubdivisionsThrow`; flow decks `opm-tests/lgr/TLGR_VSTACK_HCOMPAT.DATA` (compatible 4-vs-2 → rejected), `TLGR_SIDE_BAD.DATA` (incompatible 3-vs-2). |
+| A2 | **Touching boxes, different in-face subdivisions** (different `cellsPerDim` in a *shared/overlap* direction). **Compatible** (one factor a multiple of the other) on a **face-sharing pair with one box uniformly finer** is now **SUPPORTED (2026-06-26)** via a sub-face mosaic on the coarser side — see the note below. Still rejected: **incompatible** (non-multiple) subdivisions, **edge/corner** contact (1-D mosaic), and **mixed nesting** (each box finer in a different in-face direction). | `ConformingBlockBuilder.cpp` (guard relaxed to compatible+cleanly-nested face share); `LeafGridAssembler.cpp` (`assembleLeafGrid` finer-emits / coarser-suppresses mosaic) | unit tests `stackedCompatibleInFaceMosaicBuilds`, `sideBySideCompatibleInFaceMosaicBuilds`, `adaptiveStackedCompatibleInFaceMosaic` (build conformal leaves); `faceSharingNonMatchingSubdivisionsThrow`, `TLGR_SIDE_BAD.DATA` (incompatible 3-vs-2 → still rejected). Flow deck `TLGR_VSTACK_HCOMPAT.DATA` (compatible 4-vs-2) now **runs to completion**. |
 | A3 | **Box that cannot be kept on one rank** (spans whole grid, or would empty another rank) — parallel only | `ConformingBlockBuilder.cpp:97` (classifyBox) / `CpGridVanguard::applyLgrPartitionCellGroups_` | `opm-tests/lgr/SPE1CASE1_CARFIN_GR.DATA` (`LGR1` spans the entire grid) — runs serial, throws an actionable error in parallel. Master supports it (distribute-then-refine). |
 | A4 | **A refinement box crossing a coarse fault that is *not* on the box boundary in some configs** | — | covered by `SIMPLE_2PH_W_FAULT_LGR` (boundary-crossing fault works); deep fault/pinch interactions inside a box are not separately tested. |
 
@@ -31,7 +31,22 @@ Note: `CARFIN.DATA`/`CARFIN_FLEX.DATA` (diagonal, edge/corner-touching) now buil
 and are bit-identical to master. `CARFIN_FAULTS.DATA` / `*XYZ-NON.DATA` fail in
 opm-common `FAULTS` parsing **on master too** — not a refinement gap.
 
-### A2 detail — compatible touching boxes via a sub-face mosaic (not implemented)
+### A2 detail — compatible touching boxes via a sub-face mosaic (IMPLEMENTED 2026-06-26)
+
+> **Status:** the **compatible** case below is now implemented for a face-sharing
+> pair where one box is uniformly the finer side (the common "refine region A more
+> than the adjacent region B" pattern). The guard in `ConformingBlockBuilder.cpp`
+> was relaxed from "equal" to "equal **or** compatible + cleanly nested on a shared
+> face"; `assembleLeafGrid` then has the finer box emit every interface sub-face
+> with the coarser covering cell as its outside, while the coarser box suppresses
+> its own interface faces — so each coarser interface cell becomes a >6-face hex
+> tiled by the finer sub-faces, exactly as at a box↔coarse boundary. The corner
+> pool already merges the shared corners by exact coordinate (the coarser corners
+> are a subset of the finer ones), so no new geometry is constructed. **Still
+> unsupported:** incompatible (non-multiple) factors, edge/corner contact (a 1-D
+> mosaic), and mixed nesting (each box finer in a different in-face direction) —
+> all still throw. The historical analysis below is retained for context.
+
 
 Two refinement boxes that share a 2-D face are conformal only if their
 subdivisions match in the **in-face** directions (the two directions *parallel*
