@@ -422,6 +422,16 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     // mosaic neighbor, only the outside cell is refined).
     std::map<std::vector<int>, int> sharedBoundaryFaceLeaf; // corner set -> owner leaf face
 
+    // Per box: refined (box-global) Cartesian index -> level cell index. Used by
+    // the compatible sub-face mosaic below to find, for a finer box's boundary
+    // sub-face, the coarser box's child cell it abuts (LGR_GAPS A2).
+    std::vector<std::map<int,int>> refinedCartToCell(numBoxes);
+    for (int b = 0; b < numBoxes; ++b) {
+        for (int c = 0; c < boxes[b].level->size(0); ++c) {
+            refinedCartToCell[b][boxes[b].level->globalCell()[c]] = c;
+        }
+    }
+
     // Pre-pass: which (box, axis, side) boundaries are faulted (some parent on
     // that side has a split/partial level-zero face). Decided before the face
     // loop so that ALL box boundary faces on a faulted side are suppressed
@@ -499,19 +509,66 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                         outside = leafIdxOfCell0[neighbor];
                     }
                     else if (neighbor >= 0) {
-                        // Toward another refined box: pair the two faces.
-                        const auto key = mergedCornerSet(face);
-                        const auto it = sharedBoundaryFaceLeaf.find(key);
-                        const int thisCellLeaf = leafIdxOfLevelCell[b][cell];
-                        if (it != sharedBoundaryFaceLeaf.end()) {
-                            // Partner: map onto the owner's face, supply our
-                            // cell as its second side, do not emit a face.
-                            box.faceToLeaf[face] = it->second;
-                            mosaicOutside[it->second] = thisCellLeaf;
-                            continue;
+                        // Toward another refined box. The two boxes share this
+                        // 2-D face; its in-face directions are the two axes
+                        // other than `axis` (the perpendicular touch direction).
+                        const int nbBox = boxOfCell[neighbor];
+                        const auto& facA = box.factors;
+                        const auto& facB = boxes[nbBox].factors;
+                        const int u = (axis == 0) ? 1 : 0;
+                        const int v = (axis == 2) ? 1 : 2;
+                        if (facA[u] == facB[u] && facA[v] == facB[v]) {
+                            // Matching in-face subdivisions: 1:1 face pairing by
+                            // corner set (both sides have identical sub-faces).
+                            const auto key = mergedCornerSet(face);
+                            const auto it = sharedBoundaryFaceLeaf.find(key);
+                            const int thisCellLeaf = leafIdxOfLevelCell[b][cell];
+                            if (it != sharedBoundaryFaceLeaf.end()) {
+                                // Partner: map onto the owner's face, supply our
+                                // cell as its second side, do not emit a face.
+                                box.faceToLeaf[face] = it->second;
+                                mosaicOutside[it->second] = thisCellLeaf;
+                                continue;
+                            }
+                            // Owner: emit now, partner patches its cell later.
+                            sharedBoundaryFaceLeaf.emplace(key, static_cast<int>(leafFaces.size()));
                         }
-                        // Owner: emit now, partner patches its cell later.
-                        sharedBoundaryFaceLeaf.emplace(key, static_cast<int>(leafFaces.size()));
+                        else {
+                            // Compatible different subdivisions (guard-enforced:
+                            // one box is uniformly finer). The finer side emits
+                            // every sub-face and references the coarser side's
+                            // covering cell as the outside; the coarser side
+                            // suppresses its interface faces, so its interface
+                            // cells become >6-face hexes tiled by the finer
+                            // sub-faces (LGR_GAPS A2 sub-face mosaic).
+                            const bool thisFiner = (facA[u] >= facB[u] && facA[v] >= facB[v]);
+                            if (!thisFiner) {
+                                continue;       // coarser side: the finer references us
+                            }
+                            // Sub-position of this finer cell within its parent;
+                            // map it to the coarser box's covering child cell.
+                            std::array<int,3> subB{};
+                            subB[axis] = (side > 0) ? 0 : (facB[axis] - 1);
+                            for (const int c : {u, v}) {
+                                const int subA = lattice[c] % facA[c];
+                                subB[c] = subA * facB[c] / facA[c];
+                            }
+                            const int ncart = level0.globalCell()[neighbor];
+                            const std::array<int,3> nijk = { ncart % dims0[0],
+                                                             (ncart / dims0[0]) % dims0[1],
+                                                             ncart / (dims0[0]*dims0[1]) };
+                            const auto& startB = requests[nbBox].startIJK;
+                            const auto& rdB = boxes[nbBox].refinedDims;
+                            std::array<int,3> latB{};
+                            for (int c = 0; c < 3; ++c) {
+                                latB[c] = (nijk[c] - startB[c]) * facB[c] + subB[c];
+                            }
+                            const int cartB = latB[0] + rdB[0]*latB[1] + rdB[0]*rdB[1]*latB[2];
+                            const auto cit = refinedCartToCell[nbBox].find(cartB);
+                            if (cit != refinedCartToCell[nbBox].end()) {
+                                outside = leafIdxOfLevelCell[nbBox][cit->second];
+                            }
+                        }
                     }
                 }
                 // else: internal hole boundary -> stays a boundary face.
