@@ -59,9 +59,14 @@ namespace Opm
 /// equivalence.
 ///
 /// Restrictions (inherited from the oracle builder, throw): serial; "GLOBAL"
-/// parent only (no nested); marked boxes pairwise separated by >= 1 cell (no
-/// touching); a single adapt() of level zero (re-adapt of an already-refined
-/// grid is not implemented yet).
+/// parent only (no nested). Marked regions of the *same* factor merge and may be
+/// adjacent. Two regions of *different* factor become touching boxes; the builder
+/// accepts them when their subdivisions match in the two in-face directions (the
+/// touch/perpendicular direction is always free, e.g. vertically-stacked boxes
+/// may differ in K), OR when they differ by a *compatible* multiple with one box
+/// uniformly the finer side on the shared face -- then the coarser side is tiled
+/// by a sub-face mosaic (LGR_GAPS A2). Still rejected: incompatible (non-multiple)
+/// in-face factors, edge/corner contact, and mixed nesting.
 class AdaptiveCpGrid
 {
 public:
