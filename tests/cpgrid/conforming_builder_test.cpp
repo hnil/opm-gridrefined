@@ -668,6 +668,58 @@ BOOST_AUTO_TEST_CASE(sideBySideCompatibleInFaceMosaicBuilds)
     checkEveryInteriorFaceTwoSided(grid);
 }
 
+// ---------------------------------------------------------------------------
+// A5 (LGR_GAPS A5): two refined boxes meeting side-by-side across a FAULT. The
+// shared vertical face coincides with the fault throw, so the two refined sides'
+// sub-faces are vertically staggered. The faulted-boundary machinery now maps a
+// "refined away" neighbour to the neighbour box's child cell (instead of skipping
+// it), assembling the staggered interface conformally. First cut: equal
+// subdivisions both sides.
+// ---------------------------------------------------------------------------
+BOOST_AUTO_TEST_CASE(faceSharingAcrossFaultEqualSubdiv)
+{
+    auto depth = [](int i_, int, int k_) {
+        const double base = 2.0*(cellOf(k_) + sideOf(k_));
+        return (cellOf(i_) >= 2) ? base + 0.6 : base;     // fault between i=1 and i=2
+    };
+    auto parent = makeVerticalPillarGrid({4, 2, 2}, depth);
+    Dune::CpGrid grid;
+    auto raw = parent.raw();
+    grid.processEclipseFormat(raw, false);
+    const double volumeBefore = totalVolume(grid);
+
+    BuilderGuard guard(std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+        parent.dims, parent.coord, parent.zcorn, parent.actnum));
+
+    // Box A i in [0,2), box B i in [2,4); shared i=2 face IS the fault. Equal
+    // subdivisions both sides.
+    grid.addLgrsUpdateLeafView(
+        {{2,2,2}, {2,2,2}}, {{0,0,0}, {2,0,0}}, {{2,2,2}, {4,2,2}}, {"A", "B"});
+
+    BOOST_REQUIRE_EQUAL(grid.maxLevel(), 2);
+    BOOST_CHECK_CLOSE(totalVolume(grid), volumeBefore, 1e-8);
+    BOOST_CHECK_SMALL(maxClosure(grid), 1e-9);          // every cell closed
+    checkEveryInteriorFaceTwoSided(grid);               // no hanging faces
+
+    // The two boxes are actually connected across the fault: there exist interior
+    // faces pairing an A-child (i<2) with a B-child (i>=2).
+    int abConnections = 0;
+    const auto& dims = grid.logicalCartesianSize();
+    for (const auto& element : Dune::elements(grid.leafGridView())) {
+        for (const auto& is : Dune::intersections(grid.leafGridView(), element)) {
+            if (!is.neighbor() || !is.inside().hasFather() || !is.outside().hasFather()) {
+                continue;
+            }
+            const int ii = grid.globalCell()[is.inside().index()]  % dims[0];
+            const int oi = grid.globalCell()[is.outside().index()] % dims[0];
+            if ((ii < 2) != (oi < 2)) {
+                ++abConnections;
+            }
+        }
+    }
+    BOOST_CHECK_GT(abConnections, 0);
+}
+
 // Nested LGR (a box whose parent is another LGR). The level grids are built
 // over their parent (Phase A/B of docs/NESTED_LGR_PLAN.md), but the recursive
 // leaf stitching (Phase C) is not implemented yet, so the build is expected to
