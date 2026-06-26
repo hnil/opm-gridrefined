@@ -76,27 +76,30 @@ void makeCartesian(int nx, int ny, int nz,
                       + 4 * static_cast<std::size_t>(nx) * ny * k] = 0.5 * (k + 1);
 }
 
-// "First-level LGR" refinement exactly as flow's static CARFIN path does it:
-// build the coarse grid, then addLgrsUpdateLeafView (register the conforming
-// builder + refine). Returns the refinement time in ms (coarse build excluded).
-double timeStaticLgrRefine(int nx, int ny, int nz, int fac)
+// Measure access over a refined leaf: iterate+geometry and element->index lookup.
+template<class Grid>
+std::pair<double,double> measureAccess(const Grid& grid, double& volOut, long& chkOut)
 {
-    std::vector<double> coord, zcorn;
-    makeCartesian(nx, ny, nz, coord, zcorn);
-    Dune::CpGrid grid;
-    grdecl g{};
-    g.dims[0] = nx; g.dims[1] = ny; g.dims[2] = nz;
-    g.coord = coord.data(); g.zcorn = zcorn.data(); g.actnum = nullptr;
-    grid.processEclipseFormat(g, false);
+    const auto leaf = grid.leafGridView();
+    const long leafCells = grid.size(0);
+    Dune::MultipleCodimMultipleGeomTypeMapper<std::decay_t<decltype(leaf)>>
+        mapper(leaf, Dune::mcmgElementLayout());
 
-    auto a = Clock::now();
-    auto prev = Opm::Refinement::setBuilder(
-        std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
-            std::array<int,3>{nx, ny, nz}, coord, zcorn, std::vector<int>{}));
-    grid.addLgrsUpdateLeafView({{fac,fac,fac}}, {{0,0,0}}, {{nx,ny,nz}}, {"LGR1"});
-    auto b = Clock::now();
-    Opm::Refinement::setBuilder(std::move(prev));
-    return msOf(a, b);
+    double bestIter = 1e30, bestLook = 1e30, vol = 0.0;
+    long chk = 0;
+    for (int rep = 0; rep < 3; ++rep) {       // best-of-3 to damp cache/timing noise
+        auto a = Clock::now();
+        vol = 0.0;
+        for (const auto& e : Dune::elements(leaf)) vol += e.geometry().volume();
+        auto b = Clock::now();
+        chk = 0;
+        for (const auto& e : Dune::elements(leaf)) chk += mapper.index(e);
+        auto c = Clock::now();
+        bestIter = std::min(bestIter, msOf(a, b));
+        bestLook = std::min(bestLook, msOf(b, c));
+    }
+    volOut = vol; chkOut = chk;
+    return { leafCells / (bestIter * 1e3), leafCells / (bestLook * 1e3) };  // M cells/s
 }
 
 void runBench(int nx, int ny, int nz, int fac)
@@ -104,53 +107,48 @@ void runBench(int nx, int ny, int nz, int fac)
     std::vector<double> coord, zcorn;
     makeCartesian(nx, ny, nz, coord, zcorn);
     const long coarse = static_cast<long>(nx) * ny * nz;
+    double vol; long chk;
 
-    // best-of-3 for both refinement paths
-    double staticMs = 1e30, adaptMs = 1e30;
-    for (int rep = 0; rep < 3; ++rep)
-        staticMs = std::min(staticMs, timeStaticLgrRefine(nx, ny, nz, fac));
+    // --- static first-level LGR: coarse + addLgrsUpdateLeafView (flow's path) ---
+    Dune::CpGrid sgrid;
+    grdecl g{};
+    g.dims[0] = nx; g.dims[1] = ny; g.dims[2] = nz;
+    g.coord = coord.data(); g.zcorn = zcorn.data(); g.actnum = nullptr;
+    sgrid.processEclipseFormat(g, false);
+    auto sa = Clock::now();
+    auto prev = Opm::Refinement::setBuilder(
+        std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+            std::array<int,3>{nx, ny, nz}, coord, zcorn, std::vector<int>{}));
+    sgrid.addLgrsUpdateLeafView({{fac,fac,fac}}, {{0,0,0}}, {{nx,ny,nz}}, {"LGR1"});
+    auto sb = Clock::now();
+    Opm::Refinement::setBuilder(std::move(prev));
+    const double staticMs = msOf(sa, sb);
+    auto [sIter, sLook] = measureAccess(sgrid, vol, chk);
 
-    auto t0 = Clock::now();
+    // --- adaptive: AdaptiveCpGrid (coarse in ctor) + adapt() ---
     Opm::AdaptiveCpGrid grid({nx, ny, nz}, coord, zcorn, {});
-    auto t1 = Clock::now();
-    grid.markBox({0,0,0}, {nx,ny,nz}, {fac,fac,fac});  // refine whole grid
-    auto t2 = Clock::now();
+    grid.markBox({0,0,0}, {nx,ny,nz}, {fac,fac,fac});
+    auto aa = Clock::now();
     grid.adapt();
-    auto t3 = Clock::now();
-    adaptMs = msOf(t2, t3);
-
-    const auto leaf = grid.grid().leafGridView();
+    auto ab = Clock::now();
+    const double adaptMs = msOf(aa, ab);
     const long leafCells = grid.grid().size(0);
+    auto [aIter, aLook] = measureAccess(grid.grid(), vol, chk);
 
-    auto t4 = Clock::now();
-    double vol = 0.0;
-    for (const auto& e : Dune::elements(leaf)) vol += e.geometry().volume();
-    auto t5 = Clock::now();
-
-    Dune::MultipleCodimMultipleGeomTypeMapper<std::decay_t<decltype(leaf)>>
-        mapper(leaf, Dune::mcmgElementLayout());
-    auto t6 = Clock::now();
-    long checksum = 0;
-    for (const auto& e : Dune::elements(leaf)) checksum += mapper.index(e);
-    auto t7 = Clock::now();
-
-    std::cout << "\n=== AdaptiveCpGrid bench " << nx << "x" << ny << "x" << nz
-              << " refine whole grid x" << fac << "/dir ===\n"
-              << "  coarse cells        : " << coarse << "\n"
-              << "  leaf cells          : " << leafCells
-              << "  (x" << (double)leafCells / coarse << ")\n"
-              << "  coarse build        : " << msOf(t0, t1) << " ms\n"
-              << "  REFINE static LGR   : " << staticMs << " ms  ("
-              << leafCells / (staticMs * 1e3) << " M leaf-cells/s)\n"
-              << "  REFINE adaptive     : " << adaptMs << " ms  ("
-              << leafCells / (adaptMs * 1e3) << " M leaf-cells/s)"
-              << "   [adaptive/static = " << adaptMs / staticMs << "x]\n"
-              << "  leaf iterate+geom   : " << msOf(t4, t5) << " ms  ("
-              << leafCells / (msOf(t4, t5) * 1e3) << " M cells/s)\n"
-              << "  leaf index lookup   : " << msOf(t6, t7) << " ms  ("
-              << leafCells / (msOf(t6, t7) * 1e3) << " M cells/s)\n"
-              << "  (vol=" << vol << " chk=" << checksum << ")\n";
+    std::cout << "\n=== bench " << nx << "x" << ny << "x" << nz
+              << " refine whole grid x" << fac << "/dir  (coarse " << coarse
+              << " -> leaf " << leafCells << ") ===\n"
+              << "  REFINE   static LGR : " << staticMs << " ms ("
+              << leafCells / (staticMs * 1e3) << " M cells/s)\n"
+              << "  REFINE   adaptive   : " << adaptMs << " ms ("
+              << leafCells / (adaptMs * 1e3) << " M cells/s)   [adaptive/static = "
+              << adaptMs / staticMs << "x]\n"
+              << "  ACCESS iterate+geom : static " << sIter << "  adaptive " << aIter
+              << " M cells/s\n"
+              << "  ACCESS index lookup : static " << sLook << "  adaptive " << aLook
+              << " M cells/s\n";
     BOOST_CHECK_GT(leafCells, coarse);
+    BOOST_CHECK_EQUAL(sgrid.size(0), grid.grid().size(0));  // same leaf both ways
 }
 
 } // namespace
