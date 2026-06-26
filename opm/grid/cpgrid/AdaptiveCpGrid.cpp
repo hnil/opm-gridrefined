@@ -24,10 +24,13 @@
 #include <opm/grid/cpgrid/refinement/RefinementBuilder.hpp>
 #include <opm/grid/cpgpreprocess/preprocess.h>
 
+#include <array>
+#include <map>
 #include <memory>
-#include <stdexcept>
+#include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace Opm
 {
@@ -41,7 +44,13 @@ AdaptiveCpGrid::AdaptiveCpGrid(const std::array<int,3>& dims,
     , zcorn_(std::move(zcorn))
     , actnum_(std::move(actnum))
 {
-    // Build the coarse (level-zero) leaf from the macro corner-point input.
+    buildCoarse_();
+}
+
+void AdaptiveCpGrid::buildCoarse_()
+{
+    // Reset to a fresh coarse (level-zero) leaf built from the macro input.
+    grid_ = std::make_unique<Dune::CpGrid>();
     grdecl g{};
     g.dims[0] = dims_[0];
     g.dims[1] = dims_[1];
@@ -49,27 +58,81 @@ AdaptiveCpGrid::AdaptiveCpGrid(const std::array<int,3>& dims,
     g.coord  = coord_.data();
     g.zcorn  = zcorn_.data();
     g.actnum = actnum_.empty() ? nullptr : actnum_.data();
-    grid_.processEclipseFormat(g, false);
+    grid_->processEclipseFormat(g, false);
 }
 
 void AdaptiveCpGrid::markBox(const std::array<int,3>& startIJK,
                              const std::array<int,3>& endIJK,
                              const std::array<int,3>& cellsPerDim,
-                             const std::string& name)
+                             const std::string& /*name*/)
 {
-    Refinement::BlockRefinement r;
-    r.name = name.empty() ? ("ADAPT" + std::to_string(marks_.size() + 1)) : name;
-    r.parentGridName = "GLOBAL";
-    r.cellsPerDim = cellsPerDim;
-    r.startIJK = startIJK;
-    r.endIJK = endIJK;
-    marks_.push_back(std::move(r));
+    for (int k = startIJK[2]; k < endIJK[2]; ++k)
+        for (int j = startIJK[1]; j < endIJK[1]; ++j)
+            for (int i = startIJK[0]; i < endIJK[0]; ++i)
+                marks_[{i, j, k}] = cellsPerDim;
 }
 
 void AdaptiveCpGrid::markCell(const std::array<int,3>& ijk,
                               const std::array<int,3>& cellsPerDim)
 {
-    markBox(ijk, {ijk[0] + 1, ijk[1] + 1, ijk[2] + 1}, cellsPerDim);
+    marks_[ijk] = cellsPerDim;
+}
+
+std::vector<Refinement::BlockRefinement>
+AdaptiveCpGrid::mergeMarksIntoBoxes_() const
+{
+    using Cell = std::array<int,3>;
+    using CellSet = std::set<Cell>;
+
+    // Group marked cells by their refinement factor; only same-factor cells can
+    // share a box.
+    std::map<std::array<int,3>, CellSet> byFactor;
+    for (const auto& [cell, fac] : marks_) {
+        byFactor[fac].insert(cell);
+    }
+
+    auto rowPresent = [](const CellSet& s, int i0, int i1, int j, int k) {
+        for (int i = i0; i <= i1; ++i)
+            if (s.find({i, j, k}) == s.end()) return false;
+        return true;
+    };
+    auto slabPresent = [&](const CellSet& s, int i0, int i1, int j0, int j1, int k) {
+        for (int j = j0; j <= j1; ++j)
+            if (!rowPresent(s, i0, i1, j, k)) return false;
+        return true;
+    };
+
+    std::vector<Refinement::BlockRefinement> boxes;
+    int idx = 0;
+    for (const auto& [fac, cellsConst] : byFactor) {
+        CellSet cells = cellsConst;
+        while (!cells.empty()) {
+            const Cell seed = *cells.begin();
+            const int i0 = seed[0], j0 = seed[1], k0 = seed[2];
+            // Greedily grow a maximal box: extend in i, then j, then k while the
+            // whole new row/slab is marked.
+            int i1 = i0;
+            while (cells.find({i1 + 1, j0, k0}) != cells.end()) ++i1;
+            int j1 = j0;
+            while (rowPresent(cells, i0, i1, j1 + 1, k0)) ++j1;
+            int k1 = k0;
+            while (slabPresent(cells, i0, i1, j0, j1, k1 + 1)) ++k1;
+
+            for (int k = k0; k <= k1; ++k)
+                for (int j = j0; j <= j1; ++j)
+                    for (int i = i0; i <= i1; ++i)
+                        cells.erase({i, j, k});
+
+            Refinement::BlockRefinement r;
+            r.name = "ADAPT" + std::to_string(++idx);
+            r.parentGridName = "GLOBAL";
+            r.cellsPerDim = fac;
+            r.startIJK = {i0, j0, k0};
+            r.endIJK   = {i1 + 1, j1 + 1, k1 + 1};
+            boxes.push_back(std::move(r));
+        }
+    }
+    return boxes;
 }
 
 void AdaptiveCpGrid::adapt()
@@ -77,48 +140,43 @@ void AdaptiveCpGrid::adapt()
     if (marks_.empty()) {
         return;
     }
-    if (grid_.maxLevel() > 0) {
-        throw std::runtime_error(
-            "AdaptiveCpGrid::adapt: the grid is already refined. Re-adapt of an "
-            "already-refined grid is not implemented yet (this first cut refines "
-            "level zero once via the full-rebuild oracle). Reconstruct the "
-            "AdaptiveCpGrid to refine a different region.");
+    const auto boxes = mergeMarksIntoBoxes_();
+
+    // Full-rebuild oracle: refine the union of all (merged) marks from the coarse
+    // grid. On a re-adapt the grid is already refined, so reset it to coarse
+    // first (rebuild from Layer A); on the first adapt the ctor's coarse grid is
+    // reused (no rebuild). Either way marks persist, so a later markCell()/
+    // markBox() + adapt() refines the union. The fast in-place mutation (design
+    // Sec.12) replaces this rebuild and is the next step.
+    if (grid_->maxLevel() > 0) {
+        buildCoarse_();
     }
 
-    // Drive the same conforming refinement builder the static CARFIN path uses.
-    // Register it for the duration of the addLgrsUpdateLeafView call, then
-    // restore whatever was registered before (RAII-style, exception-safe).
     auto previous = Refinement::setBuilder(
         std::make_unique<Refinement::ConformingBlockBuilder>(
             dims_, coord_, zcorn_, actnum_));
 
-    std::vector<std::array<int,3>> cellsPerDim;
-    std::vector<std::array<int,3>> startIJK;
-    std::vector<std::array<int,3>> endIJK;
+    std::vector<std::array<int,3>> cellsPerDim, startIJK, endIJK;
     std::vector<std::string>       names;
-    cellsPerDim.reserve(marks_.size());
-    startIJK.reserve(marks_.size());
-    endIJK.reserve(marks_.size());
-    names.reserve(marks_.size());
-    for (const auto& m : marks_) {
-        cellsPerDim.push_back(m.cellsPerDim);
-        startIJK.push_back(m.startIJK);
-        endIJK.push_back(m.endIJK);
-        names.push_back(m.name);
+    cellsPerDim.reserve(boxes.size());
+    startIJK.reserve(boxes.size());
+    endIJK.reserve(boxes.size());
+    names.reserve(boxes.size());
+    for (const auto& b : boxes) {
+        cellsPerDim.push_back(b.cellsPerDim);
+        startIJK.push_back(b.startIJK);
+        endIJK.push_back(b.endIJK);
+        names.push_back(b.name);
     }
 
     try {
-        // Same entry point as the static CARFIN path; the only difference is that
-        // the boxes come from marks here, not from a deck CARFIN keyword.
-        grid_.addLgrsUpdateLeafView(cellsPerDim, startIJK, endIJK, names);
+        grid_->addLgrsUpdateLeafView(cellsPerDim, startIJK, endIJK, names);
     }
     catch (...) {
         Refinement::setBuilder(std::move(previous));
         throw;
     }
     Refinement::setBuilder(std::move(previous));
-
-    marks_.clear();
 }
 
 } // namespace Opm

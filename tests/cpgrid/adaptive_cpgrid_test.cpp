@@ -214,7 +214,7 @@ BOOST_AUTO_TEST_CASE(adaptiveSingleBoxMatchesStatic)
     BOOST_CHECK(!adaptive.refined());
     BOOST_CHECK_EQUAL(adaptive.grid().maxLevel(), 0);          // coarse before adapt
     adaptive.markBox({1,1,1}, {3,2,2}, {2,2,2});
-    BOOST_CHECK_EQUAL(adaptive.markCount(), 1u);
+    BOOST_CHECK_EQUAL(adaptive.markCount(), 2u);   // box [1,3)x[1,2)x[1,2) = 2 cells
     adaptive.adapt();
 
     BOOST_CHECK(adaptive.refined());
@@ -281,16 +281,47 @@ BOOST_AUTO_TEST_CASE(adaptiveCartesianBox)
 }
 
 // Re-adapt of an already-refined grid is not implemented in this first cut.
-BOOST_AUTO_TEST_CASE(reAdaptThrows)
+// Cell-by-cell refinement of a contiguous region == one-go static refinement of
+// the same region (adjacent same-factor cells merge into one box).
+BOOST_AUTO_TEST_CASE(cellByCellMatchesOneGo)
 {
     const std::array<int,3> dims{4, 3, 3};
     auto g = sampleGrid(dims);
+    // one CARFIN box over the region [1,3)x[1,2)x[1,2) -> cells (1,1,1),(2,1,1).
+    auto reference = staticRefined(g, {{2,2,2}}, {{1,1,1}}, {{3,2,2}}, {"LGR1"});
+
+    // (a) mark each cell, one adapt(): the two adjacent marks merge into the box.
+    Opm::AdaptiveCpGrid a(dims, g.coord, g.zcorn, g.actnum);
+    a.markCell({1,1,1}, {2,2,2});
+    a.markCell({2,1,1}, {2,2,2});
+    a.adapt();
+    checkSameLeaf(a.grid(), *reference);
+
+    // (b) incremental: refine one cell, then re-adapt with the second added.
+    Opm::AdaptiveCpGrid b(dims, g.coord, g.zcorn, g.actnum);
+    b.markCell({1,1,1}, {2,2,2});
+    b.adapt();
+    BOOST_CHECK(b.refined());
+    b.markCell({2,1,1}, {2,2,2});
+    b.adapt();                                  // re-adapt: union -> merged box
+    checkSameLeaf(b.grid(), *reference);
+}
+
+// Re-adaptation of two separated regions == refining both in one go.
+BOOST_AUTO_TEST_CASE(reAdaptRefinesUnion)
+{
+    const std::array<int,3> dims{6, 3, 3};
+    auto g = sampleGrid(dims);
+    auto reference = staticRefined(g,
+        {{2,2,2}, {2,2,2}}, {{0,0,0}, {4,1,1}}, {{1,1,1}, {5,2,2}}, {"L1", "L2"});
+
     Opm::AdaptiveCpGrid adaptive(dims, g.coord, g.zcorn, g.actnum);
-    adaptive.markBox({1,1,1}, {3,2,2}, {2,2,2});
+    adaptive.markBox({0,0,0}, {1,1,1}, {2,2,2});
     adaptive.adapt();
     BOOST_CHECK(adaptive.refined());
-    adaptive.markBox({0,0,0}, {1,1,1}, {2,2,2});
-    BOOST_CHECK_THROW(adaptive.adapt(), std::runtime_error);
+    adaptive.markBox({4,1,1}, {5,2,2}, {2,2,2});
+    adaptive.adapt();                           // re-adapt: now both regions
+    checkSameLeaf(adaptive.grid(), *reference);
 }
 
 // No marks => adapt() is a no-op and the grid stays coarse.

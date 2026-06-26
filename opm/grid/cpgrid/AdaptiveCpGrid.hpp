@@ -23,6 +23,8 @@
 #include <opm/grid/cpgrid/refinement/RefinementRequest.hpp>
 
 #include <array>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -84,37 +86,51 @@ public:
     void markCell(const std::array<int,3>& ijk,
                   const std::array<int,3>& cellsPerDim);
 
-    /// Apply all pending marks: refine the marked regions and rebuild the leaf
-    /// view (full-rebuild oracle). Afterwards grid().maxLevel() > 0 and the leaf
-    /// is consistent (parent/child maps, ids, index sets). Throws if a mark is
-    /// invalid, if the refinement is unsupported (e.g. touching boxes), or if the
-    /// grid is already refined; on throw the grid is left unchanged.
+    /// Apply the accumulated marks: refine every marked level-zero cell and
+    /// rebuild the leaf so it is consistent (parent/child maps, ids, index sets).
+    /// Adjacent marked cells with the same refinement factor are merged into
+    /// maximal boxes first, so a contiguous region marked cell-by-cell refines
+    /// like one CARFIN box (the no-touching-boxes builder rule is satisfied).
+    ///
+    /// Re-adaptable: marks persist, so calling markCell()/markBox() again then
+    /// adapt() refines the union of all marks. This first cut re-adapts via the
+    /// full-rebuild oracle (rebuild coarse from Layer A, then refine all marks);
+    /// the fast in-place mutation (design Sec.12) is the next step. Throws if a
+    /// mark is invalid or the (merged) refinement is unsupported (e.g. two
+    /// different-factor regions that end up touching -- gap A2); on throw the grid
+    /// is left as the coarse grid.
     void adapt();
 
     //! \brief Whether adapt() has produced refined levels.
-    bool refined() const { return grid_.maxLevel() > 0; }
+    bool refined() const { return grid_->maxLevel() > 0; }
 
-    //! \brief Number of pending (not-yet-applied) refinement marks.
+    //! \brief Number of marked (not-yet-merged) level-zero cells.
     std::size_t markCount() const { return marks_.size(); }
 
     //! \brief The underlying Dune::CpGrid (coarse before adapt(), refined after).
-    Dune::CpGrid&       grid()       { return grid_; }
-    const Dune::CpGrid& grid() const { return grid_; }
+    Dune::CpGrid&       grid()       { return *grid_; }
+    const Dune::CpGrid& grid() const { return *grid_; }
 
     const std::array<int,3>& dims() const { return dims_; }
 
 private:
+    // (Re)build the coarse level-zero grid from Layer A into grid_.
+    void buildCoarse_();
+    // Greedily merge same-factor marked cells into maximal axis-aligned boxes.
+    std::vector<Refinement::BlockRefinement> mergeMarksIntoBoxes_() const;
+
     // Layer A: persistent macro corner-point description.
     std::array<int,3>   dims_;
     std::vector<double> coord_;
     std::vector<double> zcorn_;
     std::vector<int>    actnum_;
 
-    // Layer B: the derived leaf grid.
-    Dune::CpGrid grid_;
+    // Layer B: the derived leaf grid (held by pointer so buildCoarse_ can reset
+    // it cleanly for a re-adapt).
+    std::unique_ptr<Dune::CpGrid> grid_;
 
-    // Pending refinement marks (one CARFIN-equivalent box each).
-    std::vector<Refinement::BlockRefinement> marks_;
+    // Accumulated marks: level-zero cell (i,j,k) -> refinement factor per dir.
+    std::map<std::array<int,3>, std::array<int,3>> marks_;
 };
 
 } // namespace Opm
