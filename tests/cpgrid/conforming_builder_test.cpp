@@ -720,6 +720,53 @@ BOOST_AUTO_TEST_CASE(faceSharingAcrossFaultEqualSubdiv)
     BOOST_CHECK_GT(abConnections, 0);
 }
 
+// A5 + A2 combined: two refined boxes across a FAULT with DIFFERENT but compatible
+// in-face subdivisions. Box A (i<2) is x4 in K, box B (i>=2) is x2 in K (equal in
+// J); the shared i=2 vertical face is the fault throw. The finer side (A) emits
+// every interface sub-face -- carrying the throw -- and references box B's
+// coarser child that contains it, so the leaf is conformal.
+BOOST_AUTO_TEST_CASE(faceSharingAcrossFaultCompatibleSubdiv)
+{
+    auto depth = [](int i_, int, int k_) {
+        const double base = 2.0*(cellOf(k_) + sideOf(k_));
+        return (cellOf(i_) >= 2) ? base + 0.6 : base;     // fault between i=1 and i=2
+    };
+    auto parent = makeVerticalPillarGrid({4, 2, 2}, depth);
+    Dune::CpGrid grid;
+    auto raw = parent.raw();
+    grid.processEclipseFormat(raw, false);
+    const double volumeBefore = totalVolume(grid);
+
+    BuilderGuard guard(std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+        parent.dims, parent.coord, parent.zcorn, parent.actnum));
+
+    // Box A i in [0,2): x4 in K, x2 in I,J. Box B i in [2,4): x2 all. Shared i=2
+    // face IS the fault; in-face J equal, in-face K differs 4 vs 2 (compatible).
+    grid.addLgrsUpdateLeafView(
+        {{2,2,4}, {2,2,2}}, {{0,0,0}, {2,0,0}}, {{2,2,2}, {4,2,2}}, {"A", "B"});
+
+    BOOST_REQUIRE_EQUAL(grid.maxLevel(), 2);
+    BOOST_CHECK_CLOSE(totalVolume(grid), volumeBefore, 1e-8);
+    BOOST_CHECK_SMALL(maxClosure(grid), 1e-9);          // every cell closed
+    checkEveryInteriorFaceTwoSided(grid);               // no hanging faces
+
+    int abConnections = 0;
+    const auto& dims = grid.logicalCartesianSize();
+    for (const auto& element : Dune::elements(grid.leafGridView())) {
+        for (const auto& is : Dune::intersections(grid.leafGridView(), element)) {
+            if (!is.neighbor() || !is.inside().hasFather() || !is.outside().hasFather()) {
+                continue;
+            }
+            const int ii = grid.globalCell()[is.inside().index()]  % dims[0];
+            const int oi = grid.globalCell()[is.outside().index()] % dims[0];
+            if ((ii < 2) != (oi < 2)) {
+                ++abConnections;
+            }
+        }
+    }
+    BOOST_CHECK_GT(abConnections, 0);
+}
+
 // Nested LGR (a box whose parent is another LGR). The level grids are built
 // over their parent (Phase A/B of docs/NESTED_LGR_PLAN.md), but the recursive
 // leaf stitching (Phase C) is not implemented yet, so the build is expected to
