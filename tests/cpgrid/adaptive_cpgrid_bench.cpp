@@ -28,10 +28,16 @@
 
 #include <opm/grid/CpGrid.hpp>
 #include <opm/grid/cpgrid/AdaptiveCpGrid.hpp>
+#include <opm/grid/cpgrid/refinement/ConformingBlockBuilder.hpp>
+#include <opm/grid/cpgrid/refinement/RefinementBuilder.hpp>
+#include <opm/grid/cpgpreprocess/preprocess.h>
 
 #include <dune/common/parallel/mpihelper.hh>
 #include <dune/grid/common/mcmgmapper.hh>
 
+#include <memory>
+
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <iostream>
@@ -70,11 +76,39 @@ void makeCartesian(int nx, int ny, int nz,
                       + 4 * static_cast<std::size_t>(nx) * ny * k] = 0.5 * (k + 1);
 }
 
+// "First-level LGR" refinement exactly as flow's static CARFIN path does it:
+// build the coarse grid, then addLgrsUpdateLeafView (register the conforming
+// builder + refine). Returns the refinement time in ms (coarse build excluded).
+double timeStaticLgrRefine(int nx, int ny, int nz, int fac)
+{
+    std::vector<double> coord, zcorn;
+    makeCartesian(nx, ny, nz, coord, zcorn);
+    Dune::CpGrid grid;
+    grdecl g{};
+    g.dims[0] = nx; g.dims[1] = ny; g.dims[2] = nz;
+    g.coord = coord.data(); g.zcorn = zcorn.data(); g.actnum = nullptr;
+    grid.processEclipseFormat(g, false);
+
+    auto a = Clock::now();
+    auto prev = Opm::Refinement::setBuilder(
+        std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+            std::array<int,3>{nx, ny, nz}, coord, zcorn, std::vector<int>{}));
+    grid.addLgrsUpdateLeafView({{fac,fac,fac}}, {{0,0,0}}, {{nx,ny,nz}}, {"LGR1"});
+    auto b = Clock::now();
+    Opm::Refinement::setBuilder(std::move(prev));
+    return msOf(a, b);
+}
+
 void runBench(int nx, int ny, int nz, int fac)
 {
     std::vector<double> coord, zcorn;
     makeCartesian(nx, ny, nz, coord, zcorn);
     const long coarse = static_cast<long>(nx) * ny * nz;
+
+    // best-of-3 for both refinement paths
+    double staticMs = 1e30, adaptMs = 1e30;
+    for (int rep = 0; rep < 3; ++rep)
+        staticMs = std::min(staticMs, timeStaticLgrRefine(nx, ny, nz, fac));
 
     auto t0 = Clock::now();
     Opm::AdaptiveCpGrid grid({nx, ny, nz}, coord, zcorn, {});
@@ -83,6 +117,7 @@ void runBench(int nx, int ny, int nz, int fac)
     auto t2 = Clock::now();
     grid.adapt();
     auto t3 = Clock::now();
+    adaptMs = msOf(t2, t3);
 
     const auto leaf = grid.grid().leafGridView();
     const long leafCells = grid.grid().size(0);
@@ -105,8 +140,11 @@ void runBench(int nx, int ny, int nz, int fac)
               << "  leaf cells          : " << leafCells
               << "  (x" << (double)leafCells / coarse << ")\n"
               << "  coarse build        : " << msOf(t0, t1) << " ms\n"
-              << "  REFINE (adapt)      : " << msOf(t2, t3) << " ms  ("
-              << leafCells / (msOf(t2, t3) * 1e3) << " M leaf-cells/s)\n"
+              << "  REFINE static LGR   : " << staticMs << " ms  ("
+              << leafCells / (staticMs * 1e3) << " M leaf-cells/s)\n"
+              << "  REFINE adaptive     : " << adaptMs << " ms  ("
+              << leafCells / (adaptMs * 1e3) << " M leaf-cells/s)"
+              << "   [adaptive/static = " << adaptMs / staticMs << "x]\n"
               << "  leaf iterate+geom   : " << msOf(t4, t5) << " ms  ("
               << leafCells / (msOf(t4, t5) * 1e3) << " M cells/s)\n"
               << "  leaf index lookup   : " << msOf(t6, t7) << " ms  ("
