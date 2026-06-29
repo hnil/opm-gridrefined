@@ -4,10 +4,12 @@ Status of the local-grid-refinement (CARFIN/LGR) rebuild across the OPM modules.
 Companion docs: `lgr_review.md` (review), `PLAN.md` (roadmap), `LGR_GAPS.md`
 (gap list), `REDISTRIBUTION-status.md`/`-requirements.md`, `WELLTRAJ_LGR_STATUS.md`,
 `NESTED_LGR_PLAN.md`/`NESTED_LGR_TESTING.md`, `REFINE_BEFORE_REDISTRIBUTE.md`,
-`DESIGN-parallel-octree.md`/`DESIGN-builder.md` (AdaptiveCpGrid design), and
+`DESIGN-parallel-octree.md`/`DESIGN-builder.md` (AdaptiveCpGrid design),
+`REFINEMENT-ALGORITHM.md` (builder pipeline, file:line walk-through),
+`UPSTREAM_TEST_PORTING.md` (which upstream LGR tests transfer and why), and
 `RUNNING.md` (workspace root, full build/run/test guide).
 
-Last updated: 2026-06-25.
+Last updated: 2026-06-26 (branch `adaptive-cpgrid-class`, off `new_lgr`).
 
 ## Approach
 
@@ -63,7 +65,11 @@ opm-simulators. opm-gridrefined is the fork of `OPM/opm-grid`.
 | Volume/CoM-conserving corner-point refinement | ✓ | more correct than master on skewed/faulted cells |
 | Faults inside a CARFIN block | ✓ | preprocessor matches per block |
 | Edge/face-sharing (touching) boxes | ✓ | `CARFIN`, `CARFIN_FLEX` |
-| Touching-box conformity check | ✓ | equal in-face subdivisions required; compatible→mosaic-not-implemented error; incompatible→clear error |
+| Touching-box conformity check | ✓ | equal in-face subdivisions; **compatible (multiple) now builds via sub-face mosaic (A2)**; only incompatible→clear error |
+| **A2 compatible sub-face mosaic** (different in-face subdivisions, no fault) | ✓ | finer side tiles the coarser cell; `TLGR_VSTACK_HCOMPAT` now runs (was rejected) — branch `adaptive-cpgrid-class` |
+| **A5 box↔box interface across a fault** (equal + compatible) | ✓ | staggered sub-faces assembled conformally; was silently non-conformal |
+| **AdaptiveCpGrid** (post-construction local refinement) | ✓ first-cut | mark→adapt == static LGR; re-adapt + cell-by-cell; full-rebuild oracle (in-place mutation deferred) |
+| **Dune `globalRefine`/`autoRefine`** | ✓ | wired to the builder: `globalRefine(n)`=whole-grid 2^n; `autoRefine(nxnynz)`=arbitrary odd division as one LGR |
 | Parallel rank-interior single-level LGR | ✓ | CARFIN1 np2; mass balance matches serial |
 | LGR ECL output (serial + parallel cell/restart) | ✓ | EGRID/INIT/UNRST consistent, ResInsight-ready |
 | **Field-props correct on refined cells** | ✓ | EQLNUM/PVTNUM/SWATINIT (equil), FIPNUM/FPR, datum-region pressure — via LookUpData leaf-mapping |
@@ -76,7 +82,7 @@ opm-simulators. opm-gridrefined is the fork of `OPM/opm-grid`.
 | Whole-grid (box==grid) LGR in parallel | ✗→err | needs distributed refinement; rank-interior refuses clearly |
 | Nested boundary-touching child | ✗→err | rejected with containment message |
 | Redistribution / rebalancing a distributed grid | ✗ | CpGrid-level gap; belongs to dynamic AMR (`REDISTRIBUTION-status.md`) |
-| Dynamic AMR | ✗ | design only (`DESIGN-parallel-octree.md`, AdaptiveCpGrid) |
+| Dynamic AMR | ◐ | `AdaptiveCpGrid` first cut (refine-after-construction, re-adaptable); no coarsening / cross-adapt data transfer / parallel adapt yet (`DESIGN-parallel-octree.md`) |
 
 ## New / notable run options
 
@@ -145,6 +151,25 @@ compatible/incompatible messages.
 - **Parallel solver empty-partition** — handled by workarounds (ilu0 / coarsenTarget
   / HYPRE); a true min-per-rank AMG redistribution is upstream Dune work.
 - **MINPV in the parallel output grid** — not yet handled.
-- **Compatible-but-different touching subdivisions (A2)** — error in place; the
-  sub-face mosaic build is not implemented (effort medium).
+- **Incompatible (non-multiple) touching subdivisions** — clear error (genuinely
+  non-conformal). Compatible (A2) and faulted box↔box (A5) now build; only the
+  edge/corner 1-D mosaic and mixed nesting remain unimplemented.
+- **Recursive nested `globalRefine(n>1)` as n levels** — produces the 2^n leaf as
+  one level instead; true multi-level recursion needs the adaptive rebuild path.
+- **Dune adapt lifecycle (`mark`/`adapt`)** — stubbed on CpGrid; the refine engine
+  exists (`AdaptiveCpGrid`), only adapter glue + coarsening missing (see
+  `UPSTREAM_TEST_PORTING.md`).
 - **Parallel (np>1) welltraj-LGR** — untested.
+
+## 2026-06-26 — branch `adaptive-cpgrid-class` (off `new_lgr`, pushed to hnil fork)
+
+Adds, on top of `new_lgr`: the `AdaptiveCpGrid` class (mark→adapt refinement after
+construction, re-adaptable, cell-by-cell == one-go; verified bit-identical to
+static LGR) and its benchmark; the **A2 compatible sub-face mosaic** and **A5
+box↔box faulted interface** (equal + compatible) in the builder; `CpGrid::
+globalRefine`/`autoRefine` wired to the builder (no Dune mark/adapt machinery
+revived); 3 ported upstream LGR unit tests (`lgr_cartesian_idx`,
+`consistent_vertex_order_in_face`, `getParentIntersectionFromLgrBoundaryFace`) +
+`global_refine_via_builder_test`; and the docs `REFINEMENT-ALGORITHM.md` and
+`UPSTREAM_TEST_PORTING.md`. All refinement unit suites green; SPE1 CARFIN1 still
+52 Newton; `TLGR_VSTACK_HCOMPAT` (previously rejected) now runs to completion.
