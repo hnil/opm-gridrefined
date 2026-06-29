@@ -1109,9 +1109,31 @@ const CpGridFamily::Traits::LeafIndexSet& CpGrid::leafIndexSet() const
 
 void CpGrid::globalRefine (int refCount, bool /*throwOnFailure*/)
 {
-    if (refCount != 0) {
-    OPM_THROW(std::logic_error, "Local grid refinement has been removed in opm-gridrefined; the static refinement rebuild is not available yet.");
+    if (refCount == 0) {
+        return;                       // no-op
     }
+    if (refCount < 0) {
+        OPM_THROW(std::logic_error, "globalRefine: refinement count must be non-negative.");
+    }
+    if (maxLevel() != 0) {
+        OPM_THROW(std::logic_error, "globalRefine: the grid is already refined. Recursive / "
+                  "repeated global refinement is not supported in opm-gridrefined (the "
+                  "conforming block builder refines an unrefined grid only).");
+    }
+    if (refCount > 20) {
+        OPM_THROW(std::logic_error, "globalRefine: refCount is unreasonably large.");
+    }
+    // Dune globalRefine(n) = n nested 2x levels = 2^n sub-cells per direction. The
+    // single-level builder produces the SAME leaf as one whole-grid LGR with factor
+    // 2^n (uniform trilinear subdivision is associative, so the sub-cell geometry is
+    // identical) -- it just yields ONE refined level instead of n nested levels.
+    // Routed through addLgrsUpdateLeafView -- the very engine AdaptiveCpGrid drives;
+    // no deck/CARFIN needed (the builder comes from the registered builder or the
+    // retained corner-point input).
+    const int factor = 1 << refCount;          // 2^refCount
+    const auto dims = logicalCartesianSize();
+    addLgrsUpdateLeafView({{factor, factor, factor}}, {{0, 0, 0}},
+                          {{dims[0], dims[1], dims[2]}}, {"GLOBAL"});
 }
 
 const std::vector< Dune :: GeometryType >& CpGrid::geomTypes( const int codim ) const
@@ -1835,9 +1857,29 @@ void CpGrid::addLgrsUpdateLeafView(const std::vector<std::array<int,3>>& cells_p
     }
 }
 
-void CpGrid::autoRefine(const std::array<int,3>& /*nxnynz*/)
+void CpGrid::autoRefine(const std::array<int,3>& nxnynz)
 {
-    OPM_THROW(std::logic_error, "Local grid refinement has been removed in opm-gridrefined; the static refinement rebuild is not available yet.");
+    // Arbitrary anisotropic global refinement: refine every cell by the
+    // per-direction factors nxnynz. This is exactly ONE LGR over the whole grid,
+    // routed through the conforming block builder (no deck/CARFIN). Factors must
+    // be positive and odd (the upstream convention: an odd split has a central
+    // cell/row, used for well placement).
+    for (int d = 0; d < 3; ++d) {
+        if (nxnynz[d] <= 0) {
+            OPM_THROW(std::invalid_argument, "autoRefine: refinement factors must be positive.");
+        }
+        if (nxnynz[d] % 2 == 0) {
+            OPM_THROW(std::invalid_argument, "autoRefine: refinement factors must be odd "
+                      "(each refined block then has a central cell/row).");
+        }
+    }
+    if (maxLevel() != 0) {
+        OPM_THROW(std::logic_error, "autoRefine: the grid is already refined; refine an "
+                  "unrefined grid only.");
+    }
+    const auto dims = logicalCartesianSize();
+    addLgrsUpdateLeafView({nxnynz}, {{0, 0, 0}},
+                          {{dims[0], dims[1], dims[2]}}, {"GLOBAL"});
 }
 
 const std::map<std::string,int>& CpGrid::getLgrNameToLevel() const{
