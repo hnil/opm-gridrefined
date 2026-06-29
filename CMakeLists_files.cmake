@@ -119,6 +119,10 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/faulted_boundary_test.cpp
   tests/cpgrid/edge_conformal_refinement_test.cpp
   tests/cpgrid/refined_structure_comparison_test.cpp
+  tests/cpgrid/lgr/consistent_vertex_order_in_face_test.cpp
+  tests/cpgrid/lgr/getParentIntersectionFromLgrBoundaryFace_test.cpp
+  tests/cpgrid/lgr/lgr_cartesian_idx_test.cpp
+  tests/cpgrid/lgr/global_refine_via_builder_test.cpp
   tests/cpgrid/partition_cell_groups_test.cpp
   tests/cpgrid/distributed_builder_test.cpp
   tests/cpgrid/orientedentitytable_test.cpp
