@@ -35,29 +35,31 @@ a cell touches a fault the two sides are *different* surfaces, so the interface 
 matched by intersection via the preprocessor (`findconnections`), not assumed from
 the trilinear map. See `LESSONS.md` item 12 and `DESIGN-builder.md`.
 
-## ✅ Now consolidated on one branch: `new_lgr`
+## Active branch: `adaptive-cpgrid-class` (off `new_lgr`)
 
-Previously the LGR work was split across feature branches (welltraj vs
-nested/refine-before) that were never merged, so no single branch had everything.
-**As of 2026-06-25 all of it is consolidated onto `new_lgr` in every repo** —
-`nested-lgr-parallel` (nested + refine-before + field-props/solver fixes) with the
-welltraj + conformity + design-doc work cherry-picked on top. Built and verified
-end-to-end (see Verification). Develop on `new_lgr` going forward.
+`new_lgr` is the consolidated trunk (nested + refine-before + field-props/solver +
+welltraj + conformity + design docs, on every repo). **`adaptive-cpgrid-class`
+builds on top of it in opm-gridrefined** and is the branch this doc now describes:
+it adds the `AdaptiveCpGrid` class, the A2 compatible sub-face mosaic, the A5
+box↔box faulted interface, and the `globalRefine`/`autoRefine` builder wiring (see
+the dated section at the end). Only **opm-gridrefined** diverges from `new_lgr`;
+the other three repos stay on `new_lgr`. Pushed to the hnil fork.
 
 ### Branches / commits to compile
 
 | Repo | Branch | code HEAD | fork remote | upstream |
 |---|---|---|---|---|
 | opm-common      | `new_lgr` | `6291b8165` | `git@github.com:hnil/opm-common.git` | `OPM/opm-common` |
-| opm-gridrefined | `new_lgr` | `5030fe10`* | `git@github.com:hnil/opm-gridrefined.git` | `OPM/opm-grid` |
+| opm-gridrefined | **`adaptive-cpgrid-class`** | `fd2ffe97` | `git@github.com:hnil/opm-gridrefined.git` | `OPM/opm-grid` |
 | opm-simulators  | `new_lgr` | `8970d1b92` | `git@github.com:hnil/opm-simulators.git` | `OPM/opm-simulators` |
 | opm-tests       | `new_lgr` | `3b86809c`  | `git@github.com:hnil/opm-tests.git` | `OPM/opm-tests` |
 
-\* opm-gridrefined `new_lgr` tip advances with this docs commit; the code tip is
-`5030fe10` (conformity). Build order: opm-common → opm-gridrefined(as opm-grid) →
-opm-simulators. opm-gridrefined is the fork of `OPM/opm-grid`.
+Build order: opm-common → opm-gridrefined(as opm-grid) → opm-simulators.
+opm-gridrefined is the fork of `OPM/opm-grid`. For the flow-level
+`flow_blackoil_adaptive` executable, use the opm-simulators `adaptive-cpgrid-class`
+branch (separate, not pushed in this round).
 
-## Capability status (all on `new_lgr`)
+## Capability status (on `adaptive-cpgrid-class`)
 
 | Capability | Status | Notes |
 |---|---|---|
@@ -134,12 +136,20 @@ the regression harness, and comparison tools.
 
 ## Verification (2026-06-25, on `new_lgr` / `builds/refined`)
 
-Grid tests `conforming_builder_test` (16) + `grdecl_refinement_test` (5) green;
-serial CARFIN1 = 52 Newton; parallel CARFIN1 np2 = 71 Newton; nested contained =
-54 Newton; refine-before np2 = End of simulation; model2 welltraj vs COMPDATL
-≤0.3% (with the field-props fix now active); WELTRAJ-01_CARFIN = 88 / model5 = 251
-Newton; touching-box decks build (compatible vertical) or reject with the correct
-compatible/incompatible messages.
+Grid tests all green on `adaptive-cpgrid-class`/`builds/refined`:
+`conforming_builder_test` (20 cases incl. A2 stacked/side-by-side mosaic and A5
+equal/compatible faulted box↔box), `grdecl_refinement_test`, `adaptive_cpgrid_test`
+(mark→adapt == static LGR, re-adapt, cell-by-cell), `faulted_boundary_test`,
+`edge_conformal_refinement_test`, `level_grid_assembler_test`,
+`refined_structure_comparison_test`, `refinement_seam_test`,
+`global_refine_via_builder_test` (6: globalRefine 2^n + autoRefine odd division ==
+whole-grid LGR), and the 3 ported upstream tests (`lgr_cartesian_idx`,
+`consistent_vertex_order_in_face`, `getParentIntersectionFromLgrBoundaryFace`).
+Flow: serial CARFIN1 = 52 Newton (unchanged); parallel CARFIN1 np2 = 71 Newton;
+nested contained = 54 Newton; refine-before np2 = End of simulation; model2
+welltraj vs COMPDATL ≤0.3%; WELTRAJ-01_CARFIN = 88 / model5 = 251 Newton;
+**`TLGR_VSTACK_HCOMPAT` (compatible 4-vs-2, previously rejected) now runs to
+completion (58 Newton)**; incompatible touching still rejects with a clear message.
 
 ## Remaining gaps (details in `LGR_GAPS.md`)
 
