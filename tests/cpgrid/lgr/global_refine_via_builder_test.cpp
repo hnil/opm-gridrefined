@@ -152,12 +152,17 @@ BOOST_AUTO_TEST_CASE(globalRefineOneMatchesWholeGridLgr)
     BOOST_CHECK_EQUAL(viaGlobal.size(0), coarse * 8);   // 2x2x2 per cell
     checkClosedLeaf(viaGlobal);
 
+    // The reserved level-zero name map entry survives; the refinement gets its
+    // own name ("GR"), never "GLOBAL".
+    BOOST_CHECK_EQUAL(viaGlobal.getLgrNameToLevel().at("GLOBAL"), 0);
+    BOOST_CHECK_EQUAL(viaGlobal.getLgrNameToLevel().at("GR"), 1);
+
     // Reference: the same refinement requested directly as one whole-grid LGR.
     Dune::CpGrid viaLgr;
     { auto raw = g.raw(); viaLgr.processEclipseFormat(raw, false); }
     {
         BuilderGuard guard(makeBuilder(g));
-        viaLgr.addLgrsUpdateLeafView({{2,2,2}}, {{0,0,0}}, {{3,2,2}}, {"GLOBAL"});
+        viaLgr.addLgrsUpdateLeafView({{2,2,2}}, {{0,0,0}}, {{3,2,2}}, {"WHOLE"});
     }
 
     BOOST_CHECK_EQUAL(viaGlobal.size(0), viaLgr.size(0));
@@ -198,7 +203,7 @@ BOOST_AUTO_TEST_CASE(globalRefineTwoMatchesFactorFourLgr)
     { auto raw = g.raw(); viaLgr.processEclipseFormat(raw, false); }
     {
         BuilderGuard guard(makeBuilder(g));
-        viaLgr.addLgrsUpdateLeafView({{4,4,4}}, {{0,0,0}}, {{3,2,2}}, {"GLOBAL"});
+        viaLgr.addLgrsUpdateLeafView({{4,4,4}}, {{0,0,0}}, {{3,2,2}}, {"WHOLE"});
     }
     BOOST_CHECK_EQUAL(viaGlobal.size(0), viaLgr.size(0));
     BOOST_CHECK_CLOSE(totalVolume(viaGlobal), totalVolume(viaLgr), 1e-9);
@@ -242,7 +247,7 @@ BOOST_AUTO_TEST_CASE(autoRefineAnyOddDivisionMatchesWholeGridLgr)
     { auto raw = g.raw(); viaLgr.processEclipseFormat(raw, false); }
     {
         BuilderGuard guard(makeBuilder(g));
-        viaLgr.addLgrsUpdateLeafView({{3,5,7}}, {{0,0,0}}, {{3,2,2}}, {"GLOBAL"});
+        viaLgr.addLgrsUpdateLeafView({{3,5,7}}, {{0,0,0}}, {{3,2,2}}, {"WHOLE"});
     }
     BOOST_CHECK_EQUAL(viaAuto.size(0), viaLgr.size(0));
     BOOST_CHECK_CLOSE(totalVolume(viaAuto), totalVolume(viaLgr), 1e-9);

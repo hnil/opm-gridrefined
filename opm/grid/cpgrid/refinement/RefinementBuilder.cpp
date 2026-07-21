@@ -69,6 +69,13 @@ std::unique_ptr<Builder> setBuilder(std::unique_ptr<Builder> newBuilder)
 void validateBlockRefinements(const std::vector<BlockRefinement>& requests)
 {
     for (const auto& req : requests) {
+        // "GLOBAL" is the reserved name of level zero in CpGrid::lgr_names_
+        // (and the parentGridName convention for top-level boxes); a request
+        // with that name would overwrite the level-zero map entry.
+        if (req.name == "GLOBAL") {
+            throw std::invalid_argument("Refinement request name 'GLOBAL' is reserved "
+                                        "for the level-zero grid; choose another name.");
+        }
         for (int c = 0; c < 3; ++c) {
             if (req.startIJK[c] < 0 || req.startIJK[c] >= req.endIJK[c]) {
                 throw std::invalid_argument("Invalid IJK box in refinement '" + req.name
