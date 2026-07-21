@@ -1132,8 +1132,12 @@ void CpGrid::globalRefine (int refCount, bool /*throwOnFailure*/)
     // retained corner-point input).
     const int factor = 1 << refCount;          // 2^refCount
     const auto dims = logicalCartesianSize();
+    // "GR" (global refinement), NOT "GLOBAL": lgr_names_ reserves "GLOBAL" for
+    // level zero, and addLgrsUpdateLeafView records the request name in that
+    // map -- naming the box GLOBAL would overwrite the level-zero entry and
+    // corrupt getLgrNameToLevel() for every consumer.
     addLgrsUpdateLeafView({{factor, factor, factor}}, {{0, 0, 0}},
-                          {{dims[0], dims[1], dims[2]}}, {"GLOBAL"});
+                          {{dims[0], dims[1], dims[2]}}, {"GR"});
 }
 
 const std::vector< Dune :: GeometryType >& CpGrid::geomTypes( const int codim ) const
@@ -1878,8 +1882,10 @@ void CpGrid::autoRefine(const std::array<int,3>& nxnynz)
                   "unrefined grid only.");
     }
     const auto dims = logicalCartesianSize();
+    // "AUTOREF", NOT "GLOBAL" -- see globalRefine: "GLOBAL" is the reserved
+    // level-zero name in lgr_names_ and must not be used as a request name.
     addLgrsUpdateLeafView({nxnynz}, {{0, 0, 0}},
-                          {{dims[0], dims[1], dims[2]}}, {"GLOBAL"});
+                          {{dims[0], dims[1], dims[2]}}, {"AUTOREF"});
 }
 
 const std::map<std::string,int>& CpGrid::getLgrNameToLevel() const{
