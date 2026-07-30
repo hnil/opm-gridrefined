@@ -347,3 +347,137 @@ simplification that the design leans on, not a limitation to remove.
   thereafter (octree §13).
 - **AMR backend:** deferred, gated on a serial in-house spike; p4est/t8code ruled
   out under the anisotropy choice (octree §14).
+
+# Part VI — session review (2026-07-20): the `adaptive-cpgrid-class` state
+
+State reviewed: `adaptive-cpgrid-class` @ `9e8b7cf7` (working tree clean). Since
+Part V the branch gained: per-cell marks + greedy box merging and **re-adaptation**
+in `AdaptiveCpGrid` (40f99717), the **A2** compatible sub-face mosaic (bc429677),
+**A5** box↔box faulted interfaces for equal and compatible factors (f3c05df6,
+3ceb8f46), `globalRefine`/`autoRefine` **wired to the builder** (bf166552), three
+ported upstream unit tests + `global_refine_via_builder_test`, and the
+refine/access benchmark.
+
+## VI.1 What the benchmark establishes
+
+Measured on this machine (arm64, release build, `adaptive_cpgrid_bench`):
+
+| Case | static refine | adaptive refine | ratio | access (iterate / lookup) |
+|---|---|---|---|---|
+| 40³×10 → ×2/dir (16k→128k) | 141 ms | 139 ms | 0.99× | identical |
+| 60²×20 → ×2/dir (72k→576k) | 827 ms | 826 ms | 1.00× | identical |
+| 40²×10 → ×3/dir (16k→432k) | 488 ms | 494 ms | 1.01× | identical |
+
+The oracle claim is quantified: the adaptive path costs exactly the static path
+(same builder), and the refined grid is access-neutral. Full-rebuild throughput is
+~0.7–0.9 M cells/s — i.e. ~0.8 s to rebuild a 576k leaf. That is the number the
+future incremental adapt must beat *for small mark deltas*; for infrequent
+adaptation events (the pragmatic path of §7) it is already usable.
+
+## VI.2 Findings (defects / risks in the current code)
+
+1. **`globalRefine`/`autoRefine` clobber the reserved name "GLOBAL".**
+   Both submit their whole-grid box as `{"GLOBAL"}`; `addLgrsUpdateLeafView` then
+   executes `lgr_names_["GLOBAL"] = 1`, overwriting the `{"GLOBAL", 0}` default
+   (CpGrid.hpp:1485) that marks *level zero*. Consumers of `getLgrNameToLevel()`
+   (CpGridVanguard name→level lookups, the level→name inversion for output) then
+   see level 1 named GLOBAL and level 0 unnamed; the nested path's
+   `parentGridName == "GLOBAL"` convention also collides. The new
+   `global_refine_via_builder_test` uses the same name and never checks the map,
+   so the clobber is untested. **Fix:** use a non-reserved name (`"GR"`,
+   `"AUTOREF"`) and make `validateBlockRefinements` reject `"GLOBAL"` as a
+   request name.
+
+2. **Re-adapt failure semantics lose the previous refinement.** On a re-adapt,
+   `adapt()` first resets to coarse (`buildCoarse_`) and then refines; if the
+   builder throws, the grid is left *coarse* — documented in the header, but a
+   caller holding simulation state on the previous refined leaf has no grid to
+   map it back to. Acceptable for the oracle; must be revisited with state
+   transfer (VI.3).
+
+3. **Re-adapt invalidates grid identity.** `grid_` is reset (`unique_ptr`
+   rebuild), so every `Entity`, `GridView`, mapper and cached reference into the
+   previous grid dangles. This is inherent to the rebuild oracle but must be an
+   explicit contract: consumers re-acquire everything after `adapt()`.
+
+4. **Builder registry is process-global and swapped per `adapt()`**
+   (unchanged from Part V review): two `AdaptiveCpGrid` instances adapting
+   concurrently race on `Refinement::setBuilder`. Fine serially; document or make
+   the registry per-grid before any threaded use.
+
+5. **Corner dedup relies on bitwise-equal doubles.** The leaf assembler's
+   `refinedCornerPool` keys corners by exact `std::array<double,3>`. Equal-factor
+   boxes produce bitwise-identical arithmetic today, but this is fragile against
+   compiler FMA/vectorization differences between call sites. A quantized key
+   (snap to `1e-9·diag` like EdgeConformal) or a lattice-derived key would be
+   robust.
+
+6. **Marks are monotone and `adapt()` never early-outs.** Marks persist (by
+   design, union semantics), but a re-adapt with an unchanged mark set still pays
+   the full rebuild. Cheap fix: remember the mark-set hash of the last adapt and
+   no-op when unchanged. Un-marking (→ coarsening) is not expressible.
+
+7. **Doc rot:** `markBox`'s `name` parameter is now ignored (merging renames
+   everything `ADAPT<n>`) but the header still documents it; the
+   `partition_cell_groups_test.cpp.bak` stray is still in the test tree.
+
+8. **Known divergence (from the test-restoration work):** the new builder orders
+   refined cells under *inactive parent cells* differently from upstream
+   (`levelCartToLevelCompressed` expectations fail). Decide bug-vs-intent and
+   record it; if intentional, note it wherever upstream output compatibility is
+   claimed.
+
+## VI.3 Way forward — the general adaptive part (recommended order)
+
+1. **State transfer is the missing half, and D3 ids make it easy.** Since re-adapt
+   rebuilds the grid, transfer must go through stable keys, and `stableCellId`
+   (parentCart, childIdx packing) is exactly that: partition- and build-invariant.
+   Implement a `transfer(oldGrid, newGrid, fields...)` helper: hash old leaf
+   values by stable id; new leaf pulls by id, restricting (volume-weighted) where
+   cells coarsened and prolonging (inject parent value) where cells refined. This
+   single piece turns `AdaptiveCpGrid` from a grid demo into a usable simulator
+   component — and it works unchanged with the full-rebuild oracle, so it is
+   *independent of* the fast-adapt work.
+2. **Coarsening next, not faster adapt.** With the rebuild oracle, coarsening is
+   trivially correct: `unmark()` removes marks and `adapt()` rebuilds the smaller
+   union — capability the old upstream code never had, at near-zero cost here.
+   Front-tracking (the motivating use) needs exactly mark+unmark with hysteresis.
+3. **Wire the DUNE facade.** Route `CpGrid::mark/preAdapt/adapt/postAdapt` to an
+   owned `AdaptiveCpGrid`-style controller (per Part V decisions). This unlocks
+   `FvBaseDiscretization::adaptGrid` / `EnableGridAdaptation` in flow without any
+   simulator change, and retires the inert stubs.
+4. **Incremental adapt only when profiling demands it.** The bench says rebuild ≈
+   0.8 s per 0.6M cells; for adaptation every N timesteps this is often
+   acceptable. Before in-place mutation (octree §12), do the cheap middle step:
+   **cache unchanged level grids** — marks are monotone, so a re-adapt reuses
+   every box whose geometry is unchanged and only builds new boxes + re-stitches
+   the leaf (leaf stitch is the cheap part).
+5. **Parallel adaptive = rank-interior + repartition events.** Reuse the existing
+   rank-interior machinery per adapt; treat load imbalance as an occasional
+   redistribute-from-Layer-A event (REDISTRIBUTION-requirements) rather than
+   migrating refined state.
+
+## VI.4 Recommended static-code modifications
+
+- **(now)** Fix VI.2-1 (reserved name), add the `validateBlockRefinements` guard,
+  and a name-map assertion to `global_refine_via_builder_test`.
+- **(now)** Robust corner keys (VI.2-5); delete the `.bak`; fix `markBox` doc.
+- **(cheap)** Stop copying Layer A twice per adapt: `ConformingBlockBuilder` takes
+  `coord_`/`zcorn_` by value while `AdaptiveCpGrid` keeps its own copy — pass a
+  `shared_ptr<const RetainedCornerPointInput>` through instead (matters at field
+  scale: 2 × global COORD/ZCORN per adapt call).
+- **(cheap)** `adapt()` early-out on unchanged marks (VI.2-6).
+- **(tests)** Port `lookupdataCpGrid`/`lookUpCellCentroid` + mapper tests (the
+  kept infrastructure the builder leans on is still untested here — C3); add
+  NNC/aquifer *rejection* tests to pin the D4 "throw loudly" contract.
+- **(decide)** VI.2-8 inactive-parent ordering: match upstream or document.
+
+## VI.5 Assessment
+
+The branch has crossed an important line: refinement is now *re-entrant*
+(re-adapt), *general at the interfaces that used to throw* (A2/A5), and reachable
+through the standard DUNE entry points (`globalRefine`). The equivalence oracle +
+bench give unusually strong correctness footing. The gap to "usable dynamic
+refinement in flow" is no longer grid machinery — it is (a) state transfer,
+(b) coarsening, (c) the facade wiring, in that order; all three are small
+compared to what is already built.
