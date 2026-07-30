@@ -11,6 +11,9 @@ All references are `file:line` into `opm/grid/cpgrid/...` at the state of branch
 ([CpGrid.cpp:1802-1823](../opm/grid/cpgrid/CpGrid.cpp)); the default backend is
 `ConformingBlockBuilder`. Every write into the grid's multilevel state goes
 through the single befriended accessor `GridStateWriter`.
+`CpGrid::globalRefine(n)` (one whole-grid box with factor `2^n`) and
+`CpGrid::autoRefine(nx,ny,nz)` (odd anisotropic whole-grid factors) route through
+the same entry point — no separate machinery.
 
 ---
 
@@ -372,32 +375,47 @@ The current dynamic entry, `AdaptiveCpGrid`
 ([AdaptiveCpGrid.cpp](../opm/grid/cpgrid/AdaptiveCpGrid.cpp)), is the
 **correctness-oracle** form of dynamic refinement, not yet the fast in-place
 adapter. It keeps **Layer A** (the persistent macro corner-point description) and a
-**Layer B** `Dune::CpGrid`; `markBox`/`markCell` queue CARFIN-equivalent boxes, and
-`adapt()` registers a `ConformingBlockBuilder` and drives the *same*
-`addLgrsUpdateLeafView` static path described above. Hence each `adapt()` is a full
-conforming rebuild and the refined leaf is bit-identical to the static-LGR grid —
-the discretisation (and the simulation) are identical.
+**Layer B** `Dune::CpGrid` (held by pointer so a re-adapt can rebuild it).
 
-What this establishes and what is deliberately deferred
-([AdaptiveCpGrid.hpp:32-62](../opm/grid/cpgrid/AdaptiveCpGrid.hpp),
-[DESIGN-parallel-octree.md](DESIGN-parallel-octree.md) §10-14):
+Marking is **per level-zero cell**: `markCell`/`markBox` record
+`(i,j,k) → cellsPerDim` in a persistent mark map; `adapt()` greedily merges
+same-factor marked cells into **maximal axis-aligned boxes**
+(`mergeMarksIntoBoxes_`, [AdaptiveCpGrid.cpp:81-136](../opm/grid/cpgrid/AdaptiveCpGrid.cpp)
+— grow in i, then whole rows in j, then whole slabs in k), so a contiguous region
+marked cell-by-cell refines exactly like one CARFIN box. `adapt()` then registers
+a `ConformingBlockBuilder` and drives the *same* `addLgrsUpdateLeafView` static
+path described above — each `adapt()` is a full conforming rebuild and the leaf is
+bit-identical to the static-LGR grid (verified, and benchmarked at ~1.00× the
+static path with identical access speed).
 
-- **Established:** the `mark → adapt → equivalent-leaf` seam; static/adaptive
-  equivalence; Layer A as the persistent source of truth.
-- **Deferred — fast local adapt.** Instead of rebuilding the whole leaf, refine
-  *in place*: append refined cells + free-list the replaced parent, touching only
-  the marked region. The §2 corner pool and materialized leaf topology become a
-  **per-rank derived cache** (owned+ghost only), rebuilt incrementally from Layer A.
-- **Deferred — re-adapt / factor-2 levels.** Repeated adaptation of an
-  already-refined grid (the current first cut refines level zero once and throws on
-  re-adapt, [AdaptiveCpGrid.cpp:80-86](../opm/grid/cpgrid/AdaptiveCpGrid.cpp));
-  dynamic levels with 2:1 balance and coarsening.
-- **Deferred — forest-of-octrees representation.** Refined corners reconstructed on
-  demand from sub-pillars (`root pillars + octant code`) and never persisted or
-  communicated; the macro `RetainedCornerPointInput` + the forest are the only
-  persistent/communicated state, which is what makes parallel migration cheap.
-- **Deferred — parallel root-tree migration / repartitioning** of an already-refined
-  grid.
+**Re-adaptation** is supported via the rebuild oracle: marks persist across
+adapts (union semantics), and on a re-adapt the coarse grid is first rebuilt from
+Layer A, then the merged union of all marks is refined
+([AdaptiveCpGrid.cpp:138-180](../opm/grid/cpgrid/AdaptiveCpGrid.cpp)). Two
+contract points follow: a re-adapt **replaces the grid object** (all entities,
+views and mappers into the previous grid are invalidated), and on a builder throw
+the grid is left **coarse** (the previous refinement is not restored). Touching
+regions of *different* factor are accepted when compatible (A2 sub-face mosaic;
+one side uniformly finer) and rejected when incompatible.
+
+Still deferred ([DESIGN-parallel-octree.md](DESIGN-parallel-octree.md) §10-14):
+
+- **Fast local adapt.** Instead of rebuilding, refine *in place*: append refined
+  cells + free-list the replaced parent, touching only the marked region. The §2
+  corner pool and materialized leaf topology become a **per-rank derived cache**
+  (owned+ghost only), rebuilt incrementally from Layer A. An intermediate step is
+  caching unchanged level grids across re-adapts (marks are monotone) and only
+  re-stitching the leaf.
+- **Coarsening** (un-marking) and factor-2 dynamic re-adapt levels with 2:1
+  balance. Note the rebuild oracle makes coarsening near-trivial once un-marking
+  exists: rebuild from the smaller mark union.
+- **State transfer.** Nothing carries solution fields across an adapt yet; the
+  construction-stable ids (§3.2) are the intended key (old leaf values hashed by
+  stable id → restrict/prolong onto the new leaf).
+- **Forest-of-octrees representation.** Refined corners reconstructed on demand
+  from sub-pillars (`root pillars + octant code`), never persisted or
+  communicated; macro input + forest are the only persistent/communicated state.
+- **Parallel root-tree migration / repartitioning** of an already-refined grid.
 
 The same numbering principles carry over unchanged in the dynamic design: cell
 order = level-0 order with parents replaced by children; the shared corner pool
