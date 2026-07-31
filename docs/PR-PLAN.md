@@ -137,7 +137,10 @@ opm-common/opm-simulators PRs depend on it — none of them touch
 near-verbatim derivative of the vendored ResInsight-derived
 `RigEclipseWellLogExtractor`, with the `Copyright (C) Statoil ASA` /
 `Copyright (C) Ceetron Solutions AS` lines and the "based on ResInsight" note
-dropped. **Do not submit as-is.** Fold the geometry-fed path into the existing
+dropped. *Attribution restored 2026-07-31* (opm-common `dynamic-refinement`,
+`d035bdd48`): both files now carry the Statoil/Ceetron lines and an explicit
+derivation note. The duplication itself remains; folding into the existing
+class is still the better end state. Fold the geometry-fed path into the existing
 class as a second constructor taking a flat cell-corner list — the classes
 differ by ~30 semantic lines out of 250 — which removes the duplication and the
 attribution problem together. Also extend
