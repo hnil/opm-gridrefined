@@ -8,15 +8,63 @@ Date: 2026-07-29.
 
 ---
 
+## Coordination — more than one session works on these branches
+
+Two sessions have edited the same PR branches on the same day (both reworked
+#7245 independently on 2026-07-31; `--force-with-lease` caught it and the
+result was merged by hand). Before touching a shared branch:
+
+```bash
+git fetch hnil && git log --oneline hnil/<branch> -3
+```
+
+and prefer `--force-with-lease` (never plain `--force`) so a concurrent push
+is refused rather than silently overwritten.
+
+**Restructured 2026-07-31.** `dynamic-refinement` in **opm-common** and
+**opm-simulators** was rebased onto current upstream with history rewrite;
+the pre-restructure states are preserved as
+`backup/dynamic-refinement-pre-restructure-20260731` on the hnil forks.
+**Any older checkout must re-sync before committing.** What changed:
+
+- merged work dropped (opm-common #5249/#5250; opm-simulators #7243);
+- dead commits dropped: the AVX2 guard (upstream has its own) and the
+  `HAVE_HYPRE` define (#7242 closed — the macro already reaches the
+  executables, the premise was wrong);
+- superseded commits replaced by their reviewed shapes: the level-zero-only
+  Cartesian→compressed map, the fatal/−1 `compressedIndexForInteriorLGR`, and
+  the `eclOutputEvalSupported_` helper (from the #7245 rework);
+- the nested-CARFIN commit replaced by the improved #5256 pair (which reports
+  the undefined-parent error with its deck location);
+- **the whole branch now builds and runs against upstream opm-grid.** Every
+  backend-specific grid query is behind a compile-time guard
+  (`__has_include` for `refinement/GridStateWriter.hpp`, `requires` for
+  `leafHasParentCellIndices()` and `poisonRefinedGlobalCell()`), and the
+  state transfer computes stable cell ids from the public grid interface
+  instead of `CpGridData::stableCellId()`.
+
+  Measured 2026-07-31 with `--adaptive-lgr='5 6 5 6 1 3 6 6 9'` on
+  `spe1/SPE1CASE1.DATA`: **upstream opm-grid** 328 Newton / 451
+  linearizations / 449 linear; **opm-gridrefined** 331 / 454 / 453, which
+  is unchanged from before the decoupling. The small difference between
+  the two is the refinement kernel (trilinear vs corner-point-native
+  resampling), not a regression.
+
+  Note the builder registration in `AdaptiveCpGridVanguard` is **not**
+  redundant and must stay: opm-gridrefined retains the corner-point
+  description only when the deck declares LGRs, and `--adaptive-lgr`
+  refines a deck with no CARFIN, so removing it makes that backend throw.
+
 ## Ground rules
 
-1. **The prototype branches are never touched.** `dynamic-refinement`, `new_lgr`,
-   `adaptive-cpgrid-class` stay exactly as they are, in every repo. No rebases
-   onto them, no edits, no force-pushes. Every PR branch is cut fresh off
-   `upstream/master` and *cherry-picks* from the prototype. Nothing is ever moved
-   out of it.
-2. **Sync the prototypes later**, once PRs start merging — drop the merged
-   commits at the next rebase. Not before.
+1. **Every PR branch is cut fresh off `upstream/master`** and *cherry-picks*
+   from the prototype. Work is never moved out of the prototype, only copied.
+2. **The prototype branches are restructured deliberately, not incidentally.**
+   `dynamic-refinement` was rebased on 2026-07-31 (see above) to drop merged
+   and dead commits and adopt the reviewed shapes; `new_lgr` and
+   `adaptive-cpgrid-class` are untouched. Do not rebase or force-push a
+   prototype as a side effect of other work — announce it, back it up, and
+   check the remote first, because more than one session uses them.
 3. **Never mention the fork** in a commit message or a PR body. Each PR is an
    independent improvement to upstream opm-common / opm-grid / opm-simulators,
    not a visible step toward something the reviewer cannot see. Strip any
