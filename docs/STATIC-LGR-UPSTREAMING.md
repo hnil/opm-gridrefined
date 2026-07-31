@@ -34,11 +34,14 @@ required for any of this.**
   lands on the wrong leaf cell; summary/FIP evaluation is skipped for any
   refined grid, so serial CARFIN runs write all-zero summaries; and an
   out-of-range throw fires asymmetrically across ranks and deadlocks COMPDATL
-  decks at np≥6. Markus's review point is taken: rebuilding the stale map
-  risks hiding further misuse of it, and resolving wells directly against the
-  leaf (and retiring the map where the grid is refined) is the cleaner shape.
-  The PR can be reworked that way — the three underlying bugs are independent
-  of which shape is chosen.
+  decks at np≥6. **Reworked per the review comments:** the map now contains
+  unrefined cells only — Markus's inline proposal, adopted as stated — so a
+  refined-away level-zero index resolves to "not present" instead of an
+  arbitrary child; the LGR lookup treats a missing name or out-of-range
+  position as fatal (programming errors — the level structure is identical on
+  all ranks) and returns −1 only for a cell genuinely absent on this rank,
+  matching the coarse-path contract; and the duplicated update/condition
+  blocks are factored into single helpers as suggested.
 
 - **opm-common#5252** — INIT/UNRST write their per-LGR sections in deck order
   while the EGRID writes grids in host-cell order. Post-processors pair them
