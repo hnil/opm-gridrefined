@@ -25,11 +25,14 @@ Recorded because the old text is still quoted in places:
    2026-07-20) is the same fix in the same two files —
    `StandardPreconditioners_mpi.hpp:36,170` already has `#if HAVE_AVX2_EXTENSION`.
    Dropped.
-2. **`3ea533889` (HAVE_HYPRE) was 90% redundant.** opm-common's
+2. **`3ea533889` (HAVE_HYPRE) was 100% redundant, not 90%.** opm-common's
    `FindHYPRE.cmake:68,116` already puts `HAVE_HYPRE=1` on the imported
-   target's INTERFACE. The only real defect was `PRIVATE` at
-   `opm-simulators/CMakeLists.txt:227`, which stops downstream targets
-   (`flow_blackoil`) from seeing it. Trimmed to one line.
+   target's INTERFACE, and — checked on a fresh configure — the definition
+   reaches `flow_blackoil.cpp.o` even with the `PRIVATE` link, via the
+   `simulators_add_target_options` property copy. The trimmed one-line PR
+   (#7242) was therefore **closed unmerged**: the premise that `PRIVATE` hides
+   the macro from the executables does not hold in this build system. Drop the
+   commit entirely at the next prototype rebase.
 3. **`af33a0e7a` cannot be cherry-picked.** Two of its four hunks patch code
    introduced by commits that are deliberately excluded (`fe4dc7f96`,
    `133cb128c`), so they have no pre-image on upstream. Its surviving
@@ -75,49 +78,59 @@ The adaptive work needs no fork either — upstream exposes
 
 ---
 
-## 2. Submitted (2026-07-29)
+## 2. Submitted 2026-07-29 — status as of 2026-07-30
 
 All nine were built against a clean upstream sibling stack before submission,
-and all pass CI.
+and all passed CI. A milestone view of the same material, written for sharing
+with the maintainers, is [`STATIC-LGR-UPSTREAMING.md`](STATIC-LGR-UPSTREAMING.md).
 
-| PR | Content | Label | Reviewers |
-|---|---|---|---|
-| [opm-grid#1053](https://github.com/OPM/opm-grid/pull/1053) | bound the Cartesian→compressed lookup in `WellConnections::init` | `manual:bugfix` | blattms, aritorto |
-| [opm-common#5249](https://github.com/OPM/opm-common/pull/5249) | remove 4 stray `std::cout` from the vendored `RigWellLogExtractor` | `manual:irrelevant` | akva2 |
-| [opm-common#5250](https://github.com/OPM/opm-common/pull/5250) | nested CARFIN: serialize `parent_name_grid`, validate against the parent LGR, + round-trip test | `manual:bugfix` | arturcastiel, akva2 |
-| [opm-common#5251](https://github.com/OPM/opm-common/pull/5251) | `RegionCache`: skip LGR-completed connections | `manual:bugfix` | akva2, arturcastiel |
-| [opm-common#5252](https://github.com/OPM/opm-common/pull/5252) | INIT/UNRST LGR sections in EGRID order + per-LGR integer maps | `manual:bugfix` | arturcastiel |
-| [opm-simulators#7242](https://github.com/OPM/opm-simulators/pull/7242) | link Hypre `PUBLIC` so downstream targets see `HAVE_HYPRE` | `manual:bugfix` | akva2 |
-| [opm-simulators#7243](https://github.com/OPM/opm-simulators/pull/7243) | `ParallelOverlappingILU0` empty parallel partition | `manual:irrelevant` | atgeirr, akva2 |
-| [opm-simulators#7244](https://github.com/OPM/opm-simulators/pull/7244) | map EQLNUM/PVTNUM/SWATINIT/FIP region arrays onto the leaf | `manual:bugfix` | akva2, arturcastiel |
-| [opm-simulators#7245](https://github.com/OPM/opm-simulators/pull/7245) | rebuild Cartesian→compressed after refinement; enable serial LGR summary; fix rank-asymmetric throw | `manual:bugfix` | aritorto, arturcastiel |
+| PR | Content | Status |
+|---|---|---|
+| [opm-common#5249](https://github.com/OPM/opm-common/pull/5249) | remove 4 stray `std::cout` from the vendored `RigWellLogExtractor` | **merged** |
+| [opm-common#5250](https://github.com/OPM/opm-common/pull/5250) | nested CARFIN: serialize `parent_name_grid`, validate against the parent LGR, + round-trip test | **merged** |
+| [opm-simulators#7243](https://github.com/OPM/opm-simulators/pull/7243) | `ParallelOverlappingILU0` empty parallel partition | **merged** |
+| [opm-simulators#7242](https://github.com/OPM/opm-simulators/pull/7242) | link Hypre `PUBLIC` | **closed unmerged** — premise wrong, see §0.2 |
+| [opm-common#5251](https://github.com/OPM/opm-common/pull/5251) | `RegionCache`: skip LGR-completed connections | open, awaiting review |
+| [opm-common#5252](https://github.com/OPM/opm-common/pull/5252) | INIT/UNRST LGR sections in EGRID order + per-LGR integer maps | open, awaiting review |
+| [opm-simulators#7244](https://github.com/OPM/opm-simulators/pull/7244) | map EQLNUM/PVTNUM/SWATINIT/FIP region arrays onto the leaf | open, awaiting review |
+| [opm-simulators#7245](https://github.com/OPM/opm-simulators/pull/7245) | LGR well cells + serial summary + rank-asymmetric throw | open — akva2 approved, **blattms changes-requested**, needs rework (below) |
+| [opm-grid#1053](https://github.com/OPM/opm-grid/pull/1053) | bound the Cartesian→compressed lookup | open — narrowed after changes-requested; parked at no cost |
 
-**The label is mandatory** — a required CI job (`verify-pr-label-action`) fails
-without one of `manual:bugfix` / `manual:enhancement` / `manual:new-feature` /
-`manual:irrelevant`.
+The `manual:*` label is mandatory — a required CI job
+(`verify-pr-label-action`) fails without one of `manual:bugfix` /
+`manual:enhancement` / `manual:new-feature` / `manual:irrelevant`.
 
-### Review outcome so far
+### Review outcomes
 
-**opm-grid#1053 — changes requested, then narrowed.** blattms:
+**opm-simulators#7245 — the important one.** akva2 approved with small
+suggestions; blattms requested changes on architectural grounds:
 
-> While this is generally appreciated it is 10 steps ahead of our schedule and
-> we should first make the simple cases work.
->
-> Some of this code is more dangerous than before.
+> You have surely found bugs, but the way you are fixing them is not good and
+> breaks the current architecture. Updating cartesianToCompressed might hide
+> more problems than it solves. It should simply not be used in certain
+> situations.
 
-Both points were valid. The original patch skipped connections by refinement
-level *and* silently dropped any level-zero connection whose index was out of
-range — converting a sanitizer-detectable read into a well quietly missing
-connections in the partitioning graph, with no diagnostic. The PR is now only
-the bounds check, routed into the **existing** inactive-cell test so no new skip
-path is introduced, and bounded against `cartesian_to_compressed.size()` rather
-than the product of `cartesianSize` (they agree in the `CpGrid` constructor but
-not in the four-argument one). The refinement-level half is deferred and
-recorded as gap **C5** in [`LGR_GAPS.md`](LGR_GAPS.md).
+The three bugs are acknowledged; the objection is to the *shape* of fix (a):
+refreshing the stale map keeps a global-Cartesian abstraction alive on a grid
+where it no longer means anything, and future code will keep reaching for it.
+**Rework direction: resolve well cells directly against the refined leaf at
+the two call sites and stop consulting `cartesianToCompressed_` once
+`maxLevel() > 0`, rather than rebuilding it.** Fixes (b) serial summary and
+(c) the asymmetric throw are independent of this and could be split out if
+that unblocks review. This also changes S5's baseline (below).
 
-**Note for scheduling: opm-grid#1053 unlocks nothing.** None of the eight
-opm-common/opm-simulators PRs depend on it — none of them touch
-`WellConnections` or `get_lgr_level`. It can be parked at no cost.
+**opm-grid#1053 — narrowed after changes-requested.** blattms: "10 steps ahead
+of our schedule … some of this code is more dangerous than before." Both
+points were valid — the original patch also silently dropped out-of-range
+*level-zero* connections, converting a sanitizer-detectable read into silent
+graph corruption. Now only the bounds check, routed into the existing
+inactive-cell test; the refinement-level half is deferred and recorded as gap
+**C5** in [`LGR_GAPS.md`](LGR_GAPS.md). Unlocks nothing in flight; can be
+parked or closed.
+
+**Standing maintainer signal (blattms): make the simple cases work first.**
+Sequencing below follows that: serial correctness → serial output → parallel
+output → wells-in-LGR at scale.
 
 ---
 
@@ -129,9 +142,9 @@ opm-common/opm-simulators PRs depend on it — none of them touch
 |---|---|---|---|
 | C3 | `pr/welltraj-replay-core` | `85b21ed6a`, `f59228a3f` + **`e14fbff58` squashed in**, `25e01aed3` | — (but needs the extractor refactor below) |
 | C4 | `pr/welltraj-lgr-encoding` | `5b704263f` + `218ceaf37` + `636ba6cd5`, **squashed** | C3 |
-| S5 | `pr/parallel-lgr-output-collection` | `3dfc9c0e2`, `a695c91f7`, `dbd57f3d5`\*, `f2afeb6e3`, `02937cd90` | #7245 |
-| S6 | `pr/lgr-well-partitioning-diagnostics` | `608dc5fb3`, `2a1de22b4` | #1053 (safety, not compile) |
-| S7 | `pr/nested-lgr-parent-name` | `f1b026e7b` + `aeee14882` + `8cd6342bf`, **squashed** | #5250, opm-tests nested decks |
+| S5 | `pr/parallel-lgr-output-collection` | `3dfc9c0e2`, `a695c91f7`, `dbd57f3d5`\*, `f2afeb6e3`, `02937cd90` | the **reworked** #7245 — same files, and the rework (leaf-direct lookup instead of map rebuild) changes S5's baseline; do not cut S5 until #7245's shape settles |
+| S6 | `pr/lgr-well-partitioning-diagnostics` | `608dc5fb3`, `2a1de22b4` | #1053 (safety, not compile). Touches well representation during load balancing — per blattms's simple-cases-first signal, this goes **after** serial+parallel output land, not in parallel with them |
+| S7 | `pr/nested-lgr-parent-name` | `f1b026e7b` + `aeee14882` + `8cd6342bf`, **squashed** | ~~#5250~~ merged ✓; opm-tests nested decks still needed |
 
 **C3 blocking work.** `RigEclipseWellLogExtractorGrid.{cpp,hpp}` is a 339-line
 near-verbatim derivative of the vendored ResInsight-derived
