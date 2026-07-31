@@ -102,22 +102,39 @@ The `manual:*` label is mandatory — a required CI job
 
 ### Review outcomes
 
-**opm-simulators#7245 — the important one.** akva2 approved with small
-suggestions; blattms requested changes on architectural grounds:
+**opm-simulators#7245 — reworked 2026-07-30 per review.** akva2 approved with
+small suggestions; blattms requested changes. The inline comments were more
+specific than the top-level review and fixed the design for us:
 
-> You have surely found bugs, but the way you are fixing them is not good and
-> breaks the current architecture. Updating cartesianToCompressed might hide
-> more problems than it solves. It should simply not be used in certain
-> situations.
+- **The map** (blattms's own proposal, adopted verbatim): "only add entries
+  for unrefined cells. Then it would be a mapping for existing cells on
+  level 0 only." `updateCartesianToCompressedMapping_` now skips
+  `element.hasFather()` cells and clears the map on rebuild. A refined-away
+  level-zero index resolves to "not present" (→ the existing cells-not-found
+  handling) instead of to an arbitrary child — on a refined grid a level-zero
+  Cartesian index is not a unique key, since every child reports its
+  ancestor's index and the last insert used to win. The rebuild after
+  refinement stays (leaf renumbering makes the old entries stale).
+- **`compressedIndexForInteriorLGR`** (blattms: "should be fatal … we are
+  just hiding it"): misses are now separated. Name unknown → fatal — every
+  rank registers every requested LGR with an empty level grid where it holds
+  no box cells (verified: the `lgr_names_` fill at opm-grid `CpGrid.cpp:2283`
+  runs for all requested levels), so the level structure is rank-identical
+  and a name miss is a programming error. (i,j,k) outside the LGR dims →
+  fatal. Cell absent from this rank's level mapper → −1, the one legitimate
+  miss, mirroring `compressedIndexForInterior`'s contract. The
+  "rank-interior / owning rank" comment language (a fork-model leak blattms
+  flagged) is gone: upstream refines every rank's copy, interior and overlap.
+- **akva2's dedupe**: the post-grid-change block is now
+  `updateDerivedGridState_()` shared by `loadBalance()` and `addLgrs()`; the
+  output-support condition is one private helper
+  `eclOutputEvalSupported_()` used at both `FlowProblemBlackoil` sites.
 
-The three bugs are acknowledged; the objection is to the *shape* of fix (a):
-refreshing the stale map keeps a global-Cartesian abstraction alive on a grid
-where it no longer means anything, and future code will keep reaching for it.
-**Rework direction: resolve well cells directly against the refined leaf at
-the two call sites and stop consulting `cartesianToCompressed_` once
-`maxLevel() > 0`, rather than rebuilding it.** Fixes (b) serial summary and
-(c) the asymmetric throw are independent of this and could be split out if
-that unblocks review. This also changes S5's baseline (below).
+Consequence to remember: a coarse COMPDAT connection *inside* a refined box
+now resolves to "not present" (clear error) rather than an arbitrary child.
+Same for aquifer cells inside refined boxes (AquiferNumerical/ConstantFlux
+treat −1 as not-on-rank). Both were silently wrong before; if such decks need
+to work, that is COMPDATL's job.
 
 **opm-grid#1053 — narrowed after changes-requested.** blattms: "10 steps ahead
 of our schedule … some of this code is more dangerous than before." Both
