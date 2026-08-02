@@ -78,7 +78,7 @@ The adaptive work needs no fork either — upstream exposes
 
 ---
 
-## 2. Submitted 2026-07-29 — status as of 2026-07-30
+## 2. Submitted 2026-07-29 — status as of 2026-07-31
 
 All nine were built against a clean upstream sibling stack before submission,
 and all passed CI. A milestone view of the same material, written for sharing
@@ -144,6 +144,18 @@ graph corruption. Now only the bounds check, routed into the existing
 inactive-cell test; the refinement-level half is deferred and recorded as gap
 **C5** in [`LGR_GAPS.md`](LGR_GAPS.md). Unlocks nothing in flight; can be
 parked or closed.
+
+**Status 2026-07-31.** #7245 was reworked per every inline comment (map
+restricted to unrefined cells — Markus's own proposal; fatal/−1 split in the
+LGR lookup; both duplicated blocks factored into helpers) and force-pushed
+with a point-by-point reply; his CHANGES_REQUESTED stands until he re-reviews.
+The nested-CARFIN half of #5250 was split out on review request as **#5256**;
+its reviewer (arturcastiel) is out of office until ~mid-August, which also
+stalls #5251/#5252 — he owns that output code. #5251, #5252 and #7244 have no
+reviews yet. `dynamic-refinement` was restructured (see PR-SUBMISSION-GUIDE)
+and now builds and runs against upstream opm-grid end to end, so S5 can be
+cut and verified at any time; it stays unsubmitted until #7245 settles
+because it edits the same files.
 
 **Standing maintainer signal (blattms): make the simple cases work first.**
 Sequencing below follows that: serial correctness → serial output → parallel

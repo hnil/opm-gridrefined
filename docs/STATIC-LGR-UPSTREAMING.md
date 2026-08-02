@@ -3,7 +3,7 @@
 Scope: deck-declared CARFIN, refined at simulation start — correct
 initialization, correct wells, correct output, serial and parallel. Nothing
 here concerns dynamic refinement, trajectory wells, or alternative refinement
-backends; those are separate discussions. Status as of 2026-07-30.
+backends; those are separate discussions. Status as of 2026-07-31.
 
 The grid build and solve already work on opm-grid master. Every remaining gap
 is in opm-common output or opm-simulators glue — **no opm-grid change is
@@ -15,7 +15,8 @@ required for any of this.**
   serialization, so non-root ranks deserialized an empty parent name and took a
   different code path than rank 0: asymmetric collectives, deadlock in the
   parallel grid build. This affected every parallel CARFIN run, not just nested
-  ones. Now includes a round-trip test.
+  ones. Now includes a round-trip test. (The nested-CARFIN validation half was
+  split out on review request and lives on as **#5256**, below.)
 - **opm-simulators#7243** — a rank left with an empty partition (easy to hit
   when a small LGR deck is over-decomposed) segfaulted in ILU0; now a clear
   error.
@@ -54,6 +55,11 @@ required for any of this.**
   or — worse — an in-range hit files the connection under the wrong FIP
   region silently. Needed for FIP summaries on decks with wells inside an LGR.
 
+- **opm-common#5256** — nested CARFIN validated and indexed against its
+  parent LGR instead of the global grid (split out of #5250), with the
+  undefined-parent error reported at its deck location. Reviewer is away
+  until mid-August; parked until then.
+
 - **opm-grid#1053** — narrowed after review to a pure bounds check on the
   `cartesian_to_compressed` lookup, routed into the existing inactive-cell
   handling. Nothing above depends on it; it can wait or be closed if this path
@@ -63,9 +69,11 @@ required for any of this.**
 
 1. **Parallel LGR ECL output.** The summary fix above is serial-only;
    parallel output needs the I/O rank to hold a refined reference grid and
-   collision-free cell ids in `CollectDataOnIORank`. Verifiable in existing
-   CI by flipping `spe1case1_carfin_parallel` to `--enable-ecl-output=true`.
-   Same files as #7245, so it waits for that discussion to settle.
+   collision-free cell ids in `CollectDataOnIORank`. The code exists and now
+   compiles against opm-grid master (its one backend-specific hand-off is
+   behind a compile-time guard); verifiable in existing CI by flipping
+   `spe1case1_carfin_parallel` to `--enable-ecl-output=true`. Same files as
+   #7245, so it is cut only after that review settles.
 2. **Wells inside an LGR at higher rank counts.** A COMPDATL well's
    connections carry LGR-local indices, so the well gets no say in load
    balancing and its rank can diverge from the rank that refines its box —
