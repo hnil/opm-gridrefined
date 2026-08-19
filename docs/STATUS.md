@@ -9,7 +9,7 @@ Companion docs: `lgr_review.md` (review), `PLAN.md` (roadmap), `LGR_GAPS.md`
 `UPSTREAM_TEST_PORTING.md` (which upstream LGR tests transfer and why), and
 `RUNNING.md` (workspace root, full build/run/test guide).
 
-Last updated: 2026-06-26 (branch `adaptive-cpgrid-class`, off `new_lgr`).
+Last updated: 2026-08-19 (branch `dynamic-refinement`; Norne section below).
 
 ## Approach
 
@@ -66,6 +66,8 @@ branch (separate, not pushed in this round).
 | Serial static LGR, bit-identical to master | ✓ | CARFIN1 = 52 Newton |
 | Volume/CoM-conserving corner-point refinement | ✓ | more correct than master on skewed/faulted cells |
 | Faults inside a CARFIN block | ✓ | preprocessor matches per block |
+| **Inactive parent cells inside a CARFIN box** | ✓ | refined cells inherit the father's ACTNUM; box need not be fully active (Norne 27-37/54-64/1-22: 623/2662 inactive) |
+| **Faulted box boundary on a low (I-/J-/K-) side** | ✓ | synthetic face normals now follow CpGrid's +axis convention; previously mislabelled the face side |
 | Edge/face-sharing (touching) boxes | ✓ | `CARFIN`, `CARFIN_FLEX` |
 | Touching-box conformity check | ✓ | equal in-face subdivisions; **compatible (multiple) now builds via sub-face mosaic (A2)**; only incompatible→clear error |
 | **A2 compatible sub-face mosaic** (different in-face subdivisions, no fault) | ✓ | finer side tiles the coarser cell; `TLGR_VSTACK_HCOMPAT` now runs (was rejected) — branch `adaptive-cpgrid-class` |
@@ -74,6 +76,7 @@ branch (separate, not pushed in this round).
 | **Dune `globalRefine`/`autoRefine`** | ✓ | wired to the builder: `globalRefine(n)`=whole-grid 2^n; `autoRefine(nxnynz)`=arbitrary odd division as one LGR |
 | Parallel rank-interior single-level LGR | ✓ | CARFIN1 np2; mass balance matches serial |
 | LGR ECL output (serial + parallel cell/restart) | ✓ | EGRID/INIT/UNRST consistent, ResInsight-ready |
+| **INIT/restart LGR arrays on a grid with inactive cells** | ✓ | active-sized arrays now use the father's *active* index; PORV stays Cartesian |
 | **Field-props correct on refined cells** | ✓ | EQLNUM/PVTNUM/SWATINIT (equil), FIPNUM/FPR, datum-region pressure — via LookUpData leaf-mapping |
 | THPRES + LGR | ✓ | global restart vectors copied per level |
 | Nested LGR (serial, fully contained): build+solve+output | ✓ | `*_NESTED_CONTAINED` 54 Newton |
@@ -150,6 +153,33 @@ nested contained = 54 Newton; refine-before np2 = End of simulation; model2
 welltraj vs COMPDATL ≤0.3%; WELTRAJ-01_CARFIN = 88 / model5 = 251 Newton;
 **`TLGR_VSTACK_HCOMPAT` (compatible 4-vs-2, previously rejected) now runs to
 completion (58 Newton)**; incompatible touching still rejects with a clear message.
+
+## Norne (first full-field case, 2026-08-19)
+
+`lgrtests/NORNE_LGR_NOFIN.DATA` — Norne with `CARFIN 'LGR1' 27 37 54 64 1 22 33 33 22`,
+2039 active parents of 2662, 18351 refined cells — runs the whole 247-step history:
+439 timesteps, 2532 Newton, no wasted iterations. It needed three fixes, all of
+which only a real field grid can reach:
+
+1. **Inactive parents** (opm-common `create_lgr_cells_tree`) — threw
+   "Input argument does not correspond to an active cell". Now the father list
+   covers the active parents and the child grid inherits their ACTNUM.
+2. **Active vs Cartesian father index** in the INIT LGR sections and in
+   `fatherReplicatedSolution` — read the wrong father cell (PORO 0.2477 for a
+   father holding 0.2391, PERMX 325 for 120, FIPNUM 11 for 5), and out of bounds
+   for a high-index box.
+3. **Synthetic faulted-boundary face normals** (`LeafGridAssembler`) — oriented
+   box→neighbour rather than +axis, so on a box's low side both neighbours
+   reported the opposite face of themselves. It threw only where the coarse cell
+   had no face on that side at all (Norne (26,57,19)); elsewhere
+   `getParentIntersectionFromLgrBoundaryFace` silently matched a wrong-side
+   level-0 face. Fixing it moved the fully-active reduced box from 423 steps /
+   2358 Newton to 429 / 2363 — i.e. it was affecting existing all-active faulted
+   cases too.
+
+`NORNE_LGR.DATA` (graded `NXFIN/HXFIN`) also builds and runs, but graded
+refinement is unimplemented, so it is refined uniformly 3×3×1; a warning now says
+so in terms of the consequence rather than as one more unsupported-keyword line.
 
 ## Remaining gaps (details in `LGR_GAPS.md`)
 

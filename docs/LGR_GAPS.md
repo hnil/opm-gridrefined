@@ -117,6 +117,26 @@ New decks live in `opm-tests/lgr/`, all derived from `SPE1CASE1_CARFIN1.DATA`.
 
 ---
 
+## B4-B6 — found on Norne, still open
+
+**B4 `ENDFIN` block scoping is not honoured.** `CARFIN ... ENDFIN` brackets
+keywords meant for the refined block only. OPM does not recognise `ENDFIN`, so
+those keywords apply to the whole global grid. In `NORNE_LGR.DATA` the block's
+`MINPV 0.1` overrides the field's `MINPV 500`: the reference run deactivates 496
+cells and reports 44431 active, OPM keeps all 44927. Silent, and it changes the
+model.
+
+**B5 Graded refinement (`NXFIN/NYFIN/NZFIN/HXFIN/HYFIN/HZFIN`) unimplemented.**
+The block is subdivided uniformly instead. Warned about since 2026-08-19; the
+geometry still differs from the deck's.
+
+**B6 `getParentIntersectionFromLgrBoundaryFace` picks the first same-side face.**
+A coarse cell whose boundary is faulted has several level-0 faces sharing one
+`indexInInside()`; the search returns whichever comes first, so the coarse-side
+face centre used for the transmissibility may come from the wrong sub-face.
+Pre-existing, and independent of the normal-convention fix that made the side
+itself correct.
+
 ## C. Parallel correctness / infrastructure
 
 | # | Gap | Notes |
