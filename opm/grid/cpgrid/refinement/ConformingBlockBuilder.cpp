@@ -71,9 +71,6 @@ BoxPresence classifyBox(const Dune::cpgrid::CpGridData& level0,
                         const std::array<int,3>& dims,
                         const Opm::Refinement::BlockRefinement& req)
 {
-    const int boxCells = (req.endIJK[0] - req.startIJK[0])
-                       * (req.endIJK[1] - req.startIJK[1])
-                       * (req.endIJK[2] - req.startIJK[2]);
     int interior = 0;
     int nonInterior = 0;
     const auto& globalCell = level0.globalCell();
@@ -93,10 +90,17 @@ BoxPresence classifyBox(const Dune::cpgrid::CpGridData& level0,
             }
         }
     }
+    // Presence is judged by what this rank holds, not by counting the box: a
+    // rank that owns every box cell it can see, and sees no box cell it does not
+    // own, holds the whole box -- a split box puts the far side in this rank's
+    // overlap, which is exactly the non-interior case. Counting instead needs a
+    // total that is right for the distributed grid, and the two candidates are
+    // both wrong: the Cartesian extent ignores inactive cells, and the retained
+    // ACTNUM predates MINPV. On Norne those two errors are 623 and 97 cells.
     if (interior == 0 && nonInterior == 0) {
         return BoxPresence::Absent;
     }
-    if (interior == boxCells && nonInterior == 0) {
+    if (interior > 0 && nonInterior == 0) {
         return BoxPresence::Owned;
     }
     throw std::logic_error("Refinement box '" + req.name + "' is split across MPI ranks or "
