@@ -1,7 +1,8 @@
 # Graded local refinement (NXFIN/HXFIN and friends)
 
-Survey and implementation, 2026-08-19. **Implemented** — `NORNE_LGR.DATA` runs as
-written (434 timesteps, 2463 Newton). Companion to `LGR_GAPS.md` (B5) and
+Survey and implementation, 2026-08-19. **Implemented**, with block-local `MINPV`
+— `NORNE_LGR.DATA` runs as written (434 timesteps, 2463 Newton) and its refined
+grid matches the reference simulator's cell for cell. Companion to `LGR_GAPS.md` (B5) and
 `STATUS.md`.
 
 `NORNE_LGR.DATA` was the motivating deck: it asks for graded refinement, and OPM
@@ -146,17 +147,55 @@ message:
   from a possibly-leaf entity needs a leaf-to-level mapping the method does not
   have. Nothing in flow calls it (only `ecfvstencil.hh` re-exports it).
 
-## Still open
+## Block-local MINPV
 
-**Block-local `MINPV` is not applied.** Norne's block sets `MINPV 0.1` against
-the field's `MINPV 500` precisely so the graded fine cells survive — the centre
-sub-cell is ~1/5000 of its parent's footprint. Without it the refined cells
-simply inherit their father's activity, so no fine cell is dropped for being
-small (nor kept where the reference drops it: the reference deactivates 939 of
-them). Implementing it needs refined pore volumes, which are father PORV × (child
-volume / father volume) — the same rule the PORV output now uses — and a seam to
-watch: the CpGrid level and opm-common's `EclipseGridLGR` must agree on which
-refined cells survive, or the output arrays mismatch.
+Implemented alongside the grading, because it is the same feature: a graded block
+sets `MINPV` precisely so the field's threshold does not delete the fine cells
+the grading creates.
+
+A refined cell takes its share of the father's pore volume by volume and drops
+out below the block's threshold. The decision is made once, in `EclipseState`,
+where the father's pore volume and the refined geometry are both to hand — and it
+has to be one decision, because the simulation grid's refined levels and the LGR
+grids the EGRID/INIT are written from must agree on which refined cells exist.
+The removals are recorded on the LGR grid so a later ACTNUM change (the output
+grid is the input grid with the field's `MINPV` applied) re-applies them instead
+of resurrecting the cells, and are carried on the `Carfin` so the grid builder
+sees the same mask on every rank.
+
+A nested block's `MINPV` is warned about rather than applied: its father's pore
+volume is a refined cell's, which this does not compute.
+
+## Against the reference
+
+With grading and block-local MINPV both in, **Norne's refined grid is identical
+to the reference simulator's**:
+
+| | reference | opm |
+|---|---|---|
+| global active | 44431 / 113344 | 44431 / 113344 |
+| LGR active | 19206 / 23958 | 19206 / 23958 |
+| global ACTNUM, cell by cell | — | 0 differences |
+| LGR ACTNUM, cell by cell | — | 0 differences (23958 cells) |
+| LGR HOSTNUM, cell by cell | — | 0 differences |
+
+The block's `MINPV 0.1` removes 3838 refined cells; the graded sub-pillar spacing
+reproduces the deck's `11 9 7 5 3 1 3 5 7 9 11` exactly.
+
+Flow results differ from the reference by the ordinary OPM-versus-commercial
+margin, not by anything the LGR introduces — the same deck without any LGR sits
+in the same band:
+
+| vector | OPM vs ref, no LGR | OPM vs ref, with LGR |
+|---|---|---|
+| FOPR | 3.24 % | 4.59 % |
+| FWPR | 3.45 % | 2.68 % |
+| FGPR | 3.57 % | 3.98 % |
+| FWCT | 1.80 % | 2.73 % |
+| FPR  | 0.03 % | 0.02 % |
+
+(mean absolute difference over the reference's report times, relative to the
+reference's mean; `NORNE_ATW2013` against `ECL.2014.2` for the no-LGR column.)
 
 ## Not investigated
 

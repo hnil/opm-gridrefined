@@ -151,8 +151,12 @@ graded parent's sub-pillar spacing matches the reference EGRID exactly. See
 wrongly: box-to-box interfaces involving a graded box, and
 `Entity::geometryInFather()` on a graded level.
 
-Still open there: **block-local `MINPV` is not applied**, which is what a graded
-deck sets to stop the field threshold deleting its fine cells.
+**Block-local `MINPV` — IMPLEMENTED 2026-08-19** (opm-common `42d7f07e9`) as part
+of the same feature: a refined cell takes its share of the father's pore volume
+by volume and drops out below the block's threshold. With it, Norne's refined
+grid matches the reference simulator's exactly — 19206/23958 active, zero
+cell-by-cell differences in LGR ACTNUM and HOSTNUM. Nested blocks' MINPV is
+warned about, not applied.
 
 **B6 parent-intersection ambiguity — FIXED 2026-08-19** (opm-gridrefined
 `1320af28`). `getParentIntersectionFromLgrBoundaryFace` searched for a level-0
