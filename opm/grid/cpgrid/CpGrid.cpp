@@ -57,6 +57,9 @@
 #include <opm/grid/cpgrid/refinement/RefinementBuilder.hpp>
 //#include <opm/grid/common/ZoltanGraphFunctions.hpp>
 #include <opm/grid/common/GridPartitioning.hpp>
+
+#include <limits>
+#include <optional>
 //#include <opm/grid/common/WellConnections.hpp>
 #include <opm/grid/common/CommunicationUtils.hpp>
 
@@ -1321,23 +1324,62 @@ Dune::cpgrid::Intersection CpGrid::getParentIntersectionFromLgrBoundaryFace(cons
                 ((intersection.inside().father().level() == 0) || ((intersection.outside().father().level() == 0)));
             bool coarseAndRefinedCells =  (levelIn*levelOut == 0);
             if (refinedCellsWithAtLeastOneLvl0Father || coarseAndRefinedCells) {
-                // Get the equivalent level-0 cell if intersection.inside() is already at level 0,
-                // or the coarsest ancestor at level 0 if it is a refined cell.
-                // In both cases, intersection.indexInInside() is the correct face index to match:
-                // - coarse inside (level 0): indexInInside() is already the level-0 face index.
-                // - refined inside: fine cells inherit face directions from their parent, so
-                //   indexInInside() equals the parent's face index.
+                // The leaf face is a piece of the level-0 face between the two
+                // cells' coarsest ancestors, so identify it by that cell pair.
+                //
+                // Matching on indexInInside() alone is not enough: a coarse cell
+                // whose boundary is faulted has several level-0 faces on the same
+                // side - Norne (26,57,19) has four on I+, one per neighbouring
+                // column cell - and taking the first hands the caller a face
+                // shared with some other cell, whose centre then sets this
+                // interface's transmissibility.
                 const auto& insideOrigin = intersection.inside().getOrigin();
-                for (const auto& originIntersection : intersections(this->levelGridView(0), insideOrigin)) {
-                    if (originIntersection.indexInInside() == intersection.indexInInside()) {
-                        return originIntersection;
+                const auto& outsideOrigin = intersection.outside().getOrigin();
+                const auto leafCentre = intersection.geometry().center();
+
+                if (insideOrigin.index() != outsideOrigin.index()) {
+                    std::optional<Dune::cpgrid::Intersection> best{};
+                    double bestDistance = std::numeric_limits<double>::max();
+
+                    for (const auto& originIntersection : intersections(this->levelGridView(0), insideOrigin)) {
+                        if (!originIntersection.neighbor() ||
+                            (originIntersection.outside().index() != outsideOrigin.index()))
+                        {
+                            continue;
+                        }
+                        // One ancestor pair can share more than one face when a
+                        // fault splits their interface; take the piece nearest
+                        // the leaf face.
+                        const double distance =
+                            (originIntersection.geometry().center() - leafCentre).two_norm();
+                        if (distance < bestDistance) {
+                            bestDistance = distance;
+                            best = originIntersection;
+                        }
+                    }
+
+                    if (best.has_value()) {
+                        return best.value();
+                    }
+                }
+                else {
+                    // Both leaf cells descend from the same level-0 cell, which
+                    // happens between two refinement levels inside one box. No
+                    // level-0 face separates them, so there is no parent face to
+                    // find; the caller only reads the geometry when one side is
+                    // coarse. Answer with the ancestor's face on the same side,
+                    // as this function always has.
+                    for (const auto& originIntersection : intersections(this->levelGridView(0), insideOrigin)) {
+                        if (originIntersection.indexInInside() == intersection.indexInInside()) {
+                            return originIntersection;
+                        }
                     }
                 }
             }
-            // No level-0 face on the same side of the coarsest ancestor. That
-            // means the leaf face was built with a side (min/max) that level 0
-            // does not have, i.e. its normal or its face_to_cell orientation is
-            // inconsistent with CpGrid's convention.
+            // The two coarsest ancestors share no level-0 face, so the leaf
+            // grid connects cells that level 0 does not - the leaf face was
+            // built between the wrong pair, or with a normal or face_to_cell
+            // orientation inconsistent with CpGrid's convention.
             OPM_THROW(std::invalid_argument,
                       "Parent intersection not found for face with index: " + std::to_string(intersection.id()) +
                       ", index in inside: " + std::to_string(intersection.indexInInside()) +
