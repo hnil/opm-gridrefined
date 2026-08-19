@@ -68,6 +68,8 @@ branch (separate, not pushed in this round).
 | Faults inside a CARFIN block | ✓ | preprocessor matches per block |
 | **Inactive parent cells inside a CARFIN box** | ✓ | refined cells inherit the father's ACTNUM; box need not be fully active (Norne 27-37/54-64/1-22: 623/2662 inactive) |
 | **Faulted box boundary on a low (I-/J-/K-) side** | ✓ | synthetic face normals now follow CpGrid's +axis convention; previously mislabelled the face side |
+| **`CARFIN...ENDFIN` block scoping** | ✓ | a block's keywords no longer apply to the global grid; block-*local* properties still unimplemented (refined cells inherit the father) |
+| **Parent intersection across a faulted LGR boundary** | ✓ | matched by level-0 ancestor pair, not by face side |
 | Edge/face-sharing (touching) boxes | ✓ | `CARFIN`, `CARFIN_FLEX` |
 | Touching-box conformity check | ✓ | equal in-face subdivisions; **compatible (multiple) now builds via sub-face mosaic (A2)**; only incompatible→clear error |
 | **A2 compatible sub-face mosaic** (different in-face subdivisions, no fault) | ✓ | finer side tiles the coarser cell; `TLGR_VSTACK_HCOMPAT` now runs (was rejected) — branch `adaptive-cpgrid-class` |
@@ -180,6 +182,19 @@ which only a real field grid can reach:
 `NORNE_LGR.DATA` (graded `NXFIN/HXFIN`) also builds and runs, but graded
 refinement is unimplemented, so it is refined uniformly 3×3×1; a warning now says
 so in terms of the consequence rather than as one more unsupported-keyword line.
+
+Two further fixes followed (B4, B6 in `LGR_GAPS.md`), and with them the run is
+432 timesteps / 2380 Newton and the global grid matches the reference exactly
+(44431 active, 496 removed by MINPV, 0.015 % of pore volume):
+
+4. **`ENDFIN` was not honoured**, so the CARFIN block's `MINPV 0.1` replaced the
+   field's `MINPV 500` for the whole grid. A block's keywords now carry an LGR
+   scope and stay out of the global view and out of every DeckSection. Honouring
+   it made MINPV bite, which exposed the LGR tree caching its refined ACTNUM and
+   father lists from before the change — `resetACTNUM` re-derives them now.
+5. **`getParentIntersectionFromLgrBoundaryFace` matched on the face's side
+   alone**, which a faulted coarse cell does not determine uniquely. It matches
+   on the two cells' level-0 ancestors now, with a new faulted regression deck.
 
 ## Remaining gaps (details in `LGR_GAPS.md`)
 
