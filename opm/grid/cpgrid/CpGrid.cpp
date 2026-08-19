@@ -1334,8 +1334,14 @@ Dune::cpgrid::Intersection CpGrid::getParentIntersectionFromLgrBoundaryFace(cons
                     }
                 }
             }
-            OPM_THROW(std::invalid_argument, "Parent intersection not found for face with index: " + std::to_string(intersection.id()) +
-                      " and index in inside: " + std::to_string(intersection.indexInInside()));
+            // No level-0 face on the same side of the coarsest ancestor. That
+            // means the leaf face was built with a side (min/max) that level 0
+            // does not have, i.e. its normal or its face_to_cell orientation is
+            // inconsistent with CpGrid's convention.
+            OPM_THROW(std::invalid_argument,
+                      "Parent intersection not found for face with index: " + std::to_string(intersection.id()) +
+                      ", index in inside: " + std::to_string(intersection.indexInInside()) +
+                      " (levels " + std::to_string(levelIn) + " -> " + std::to_string(levelOut) + ")");
         }
     }
     OPM_THROW(std::invalid_argument, "Face is on the boundary of the grid");

@@ -594,10 +594,11 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         int boxCell;
         int neighborCell;                        // coarse, or a refined child (A5)
         std::vector<int> points;                 // leaf corner indices
-        Dune::FieldVector<double,3> normal;      // unit, box -> neighbour
+        Dune::FieldVector<double,3> normal;      // unit, along +axis (CpGrid convention)
         Dune::FieldVector<double,3> center;
         double area;
         enum face_tag tag;
+        int side;                                // box boundary side: -1 low, +1 high
     };
     std::vector<SyntheticFace> syntheticFaces;
     if (!faultedSides.empty()) {
@@ -621,8 +622,12 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
             cornerByCoord.emplace(key3, idx);
             return idx;
         };
-        // Emit one synthetic face from a polygon given by node coordinates,
-        // oriented box -> neighbour (along the boundary side).
+        // Emit one synthetic face from a polygon given by node coordinates.
+        // The normal points along +axis, never box -> neighbour: CpGrid derives a
+        // face's min/max side (and hence Intersection::indexInInside) from the
+        // stored normal together with each cell's orientation flag, so a normal
+        // pointing down-axis makes both neighbours report the opposite face of
+        // themselves. The side is kept for the face_to_cell ordering below.
         const auto emitPolygon = [&](int boxLeaf, int neighborLeaf, int axis, int side,
                                      const std::vector<std::array<double,3>>& nodes) {
             std::vector<int> pts;
@@ -631,13 +636,13 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                 pts.push_back(poolCorner(nd));
             }
             PolyGeom pg = polygonGeometry(nodes);
-            if (pg.normal[axis] * static_cast<double>(side) < 0.0) {
+            if (pg.normal[axis] < 0.0) {
                 pg.normal *= -1.0;
                 std::reverse(pts.begin(), pts.end());
             }
             syntheticFaces.push_back(SyntheticFace{
                 boxLeaf, neighborLeaf, std::move(pts), pg.normal, pg.center,
-                pg.area, faceTagOf(axis)});
+                pg.area, faceTagOf(axis), side});
         };
         // Emit a box cell's WHOLE (axis, side) boundary face from its level grid.
         // Used to merge an over-refined shell's split pieces (unequal factors
@@ -666,13 +671,13 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                     pts.push_back(boxes[bIdx].cornerToLeaf[fp[n]]);
                 }
                 Dune::FieldVector<double,3> normal = fnorm[f];
-                if (normal[axis] * static_cast<double>(side) < 0.0) {
+                if (normal[axis] < 0.0) {
                     normal *= -1.0;
                     std::reverse(pts.begin(), pts.end());
                 }
                 syntheticFaces.push_back(SyntheticFace{
                     boxLeaf, neighborLeaf, std::move(pts), normal,
-                    fgeom[f].center(), fgeom[f].volume(), faceTagOf(axis)});
+                    fgeom[f].center(), fgeom[f].volume(), faceTagOf(axis), side});
                 return;
             }
         };
@@ -884,18 +889,31 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         leafFaceGeom[face] = srcFaceGeom[src.index];
     }
 
-    // Synthetic faulted-boundary faces: real polygon geometry, refined box cell
-    // on the normal side, the neighbour (coarse cell, or a refined child for a
-    // box<->box faulted interface) opposite (matching the mosaic convention).
+    // Synthetic faulted-boundary faces: real polygon geometry, the cell on the
+    // face's negative side first with orientation true (the mosaic convention,
+    // and what makeInverseRelation would produce). The normal runs along +axis,
+    // so that cell is the box cell on the box's high side and the neighbour
+    // (coarse cell, or a refined child for a box<->box faulted interface) on its
+    // low side -- not the box cell either way.
     for (int s = 0; s < static_cast<int>(syntheticFaces.size()); ++s) {
         const int face = numSourceFaces + s;
         const SyntheticFace& sf = syntheticFaces[s];
         std::vector<EntityRep<0>> cells;
-        cells.emplace_back(sf.boxCell, true);
-        if (sf.neighborCell >= 0) {
-            cells.emplace_back(sf.neighborCell, false);  // interior split face
+        const bool boxOnNegativeSide = (sf.side > 0);
+        if (boxOnNegativeSide) {
+            cells.emplace_back(sf.boxCell, true);
+            if (sf.neighborCell >= 0) {
+                cells.emplace_back(sf.neighborCell, false);  // interior split face
+            }
         }
-        // else: the box boundary faces the domain (fault scarp) -> boundary face
+        else {
+            if (sf.neighborCell >= 0) {
+                cells.emplace_back(sf.neighborCell, true);   // interior split face
+            }
+            cells.emplace_back(sf.boxCell, false);
+        }
+        // A missing neighbour means the box boundary faces the domain (fault
+        // scarp) -> boundary face.
         leafFaceToCell.appendRow(cells.begin(), cells.end());
         leafFaceToPoint.appendRow(sf.points.begin(), sf.points.end());
         leafTags[face] = sf.tag;
