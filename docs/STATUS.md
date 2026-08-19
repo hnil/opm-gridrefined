@@ -71,6 +71,8 @@ branch (separate, not pushed in this round).
 | **Faulted box boundary on a low (I-/J-/K-) side** | ✓ | synthetic face normals now follow CpGrid's +axis convention; previously mislabelled the face side |
 | **`CARFIN...ENDFIN` block scoping** | ✓ | a block's keywords no longer apply to the global grid; block-*local* properties still unimplemented (refined cells inherit the father) |
 | **Parent intersection across a faulted LGR boundary** | ✓ | matched by level-0 ancestor pair, not by face side |
+| **Graded refinement (`N*FIN`/`H*FIN`)** | ✓ | per-parent column counts and widths; Norne matches the reference's sub-pillar spacing. Refused for box-to-box interfaces and `geometryInFather()` |
+| Block-*local* properties (a CARFIN block's `MINPV`, `PORO`, …) | ✗ | scoped out of the global grid and warned about; refined cells inherit the father |
 | Edge/face-sharing (touching) boxes | ✓ | `CARFIN`, `CARFIN_FLEX` |
 | Touching-box conformity check | ✓ | equal in-face subdivisions; **compatible (multiple) now builds via sub-face mosaic (A2)**; only incompatible→clear error |
 | **A2 compatible sub-face mosaic** (different in-face subdivisions, no fault) | ✓ | finer side tiles the coarser cell; `TLGR_VSTACK_HCOMPAT` now runs (was rejected) — branch `adaptive-cpgrid-class` |
@@ -180,9 +182,8 @@ which only a real field grid can reach:
    2358 Newton to 429 / 2363 — i.e. it was affecting existing all-active faulted
    cases too.
 
-`NORNE_LGR.DATA` (graded `NXFIN/HXFIN`) also builds and runs, but graded
-refinement is unimplemented, so it is refined uniformly 3×3×1; a warning now says
-so in terms of the consequence rather than as one more unsupported-keyword line.
+`NORNE_LGR.DATA`, graded `NXFIN/HXFIN` and all, runs as written: 434 timesteps,
+2463 Newton. See `GRADED-REFINEMENT.md`.
 
 Two further fixes followed (B4, B6 in `LGR_GAPS.md`), and with them the run is
 432 timesteps / 2380 Newton and the global grid matches the reference exactly

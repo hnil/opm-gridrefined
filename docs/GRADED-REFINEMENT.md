@@ -1,12 +1,12 @@
-# Graded local refinement (NXFIN/HXFIN and friends) — what it would take
+# Graded local refinement (NXFIN/HXFIN and friends)
 
-Investigation, 2026-08-19. Nothing implemented; this is the survey that should
-precede it. Companion to `LGR_GAPS.md` (B5) and `STATUS.md`.
+Survey and implementation, 2026-08-19. **Implemented** — `NORNE_LGR.DATA` runs as
+written (434 timesteps, 2463 Newton). Companion to `LGR_GAPS.md` (B5) and
+`STATUS.md`.
 
-`NORNE_LGR.DATA` is the motivating deck: it asks for graded refinement, OPM
-parses the keywords and ignores them, and the block comes out uniformly
-subdivided 3×3×1. Since 2026-08-19 that is warned about rather than silent, but
-the geometry is still not the one the deck describes.
+`NORNE_LGR.DATA` was the motivating deck: it asks for graded refinement, and OPM
+used to parse the keywords and ignore them, subdividing the block uniformly
+3×3×1 instead.
 
 ## What the keywords mean
 
@@ -65,17 +65,40 @@ What breaks is confined to the places that assume **one integer factor per
 direction**, i.e. that refined index `/ factor` gives the parent column and
 `% factor` the position inside it.
 
-## Work list
+## What was done
 
-Replace the scalar `cellsPerDim[d]` with, per direction, two tables derived once
-from `NXFIN`/`HXFIN`:
+The scalar `cellsPerDim[d]` gave way, per direction, to tables derived once from
+`NXFIN`/`HXFIN`:
 
 - `parentOfRefined[ir]` — which parent column refined column `ir` belongs to
   (prefix sums of `NXFIN`);
 - `fracLow[ir]`, `fracHigh[ir]` — its normalised extent within that parent cell
   (cumulative normalised `HXFIN`, defaulting to `j/n`).
 
-Every site below is then a table lookup instead of a division.
+Every site below became a table lookup instead of a division. The tables are
+computed in one place — `Carfin::refinedColumns()` in opm-common, mirrored by
+`Opm::Refinement::axisSubdivision()` for the grid builder, which fills in the
+uniform tables for a request that carries none so there is a single code path.
+A uniform box therefore reaches the builder exactly as before; the
+`explicitUniformTablesMatchTheFactorPath` test pins that equivalence.
+
+### Validation
+
+Against the reference EGRID for Norne's graded CARFIN, the sub-pillar spacing
+across the graded parent cell reproduces the deck's 11 9 7 5 3 1 3 5 7 9 11
+**exactly** (ratios 11.13, 9.09, 7.09, 5.04, 3.04, 1.00, … identical to the
+reference to the printed precision).
+
+The remaining few-percent differences elsewhere in the box are the reference's
+own pillar handling, not this builder's: it clips the LGR's COORD pillars to the
+LGR's depth range, and its corner sub-pillar then misses its own parent pillar by
+0.78 m, where this builder reproduces the parent pillar exactly. That is the
+corner-point-native resampling the geometry note in `STATUS.md` describes.
+
+The per-parent normalisation of `H*FIN` — inferred from Norne's deck in the
+survey below — is confirmed by that match, and by the defaulted `11*` groups
+coming out as equal shares of their parent cells, which is what the reference
+also produces.
 
 ### opm-gridrefined
 
@@ -108,28 +131,32 @@ Every site below is then a table lookup instead of a division.
 
 | Site | What it assumes |
 |---|---|
-| `flow/AdaptiveLgr.hpp:97` | derives `cellsPerDim` as `nd[d] / nparents[d]` |
+| `flow/AdaptiveLgr.hpp:97` | derives `cellsPerDim` as `nd[d] / nparents[d]` — untouched: the adaptive path produces uniform boxes by construction |
 
-## Ordering
+## Refused rather than answered wrongly
 
-1. **Block-local `MINPV` first.** It is a prerequisite, not a follow-up: without
-   it the field's `MINPV` deletes the fine cells (Norne would lose ~939 of them,
-   and a deck grading harder would lose more). It needs refined pore volumes,
-   which are father PORV × (child volume / father volume) — available from the
-   refined geometry, and the same rule as the PORV output fix above. Note this
-   introduces a seam: the CpGrid level and opm-common's `EclipseGridLGR` must
-   agree on which refined cells survive, or the output arrays mismatch.
-2. **The tables through the builder** — `RefinementRequest`, `GrdeclRefinement`,
-   `LevelGridAssembler`. Self-contained, and `grdecl_refinement_test` /
-   `level_grid_assembler_test` cover it.
-3. **Leaf assembly and `geometryInFather`** — the corner identification and the
-   faulted-boundary index arithmetic.
-4. **Output and the ratio API** — the volume-weighted PORV split.
-5. **Parsing and validation** — relax the divisibility check, attach the tables.
+Two places keep the scalar factor and now reject a graded box with a clear
+message:
 
-Steps 2–4 are mechanical once the tables exist; the design risk is concentrated
-in step 1 and in the touching-box conformity rule, which becomes a question about
-matching sub-column boundaries rather than matching integers.
+- **Box-to-box interfaces** (touching boxes, and the A5 faulted box↔box case).
+  The conformity rule compares one subdivision factor per in-face direction; the
+  graded question is whether the two sides' sub-column *boundaries* line up.
+- **`Entity::geometryInFather()`**. Placing a child in its father's unit cube
+  means knowing which of that father's columns it is, and reaching the tables
+  from a possibly-leaf entity needs a leaf-to-level mapping the method does not
+  have. Nothing in flow calls it (only `ecfvstencil.hh` re-exports it).
+
+## Still open
+
+**Block-local `MINPV` is not applied.** Norne's block sets `MINPV 0.1` against
+the field's `MINPV 500` precisely so the graded fine cells survive — the centre
+sub-cell is ~1/5000 of its parent's footprint. Without it the refined cells
+simply inherit their father's activity, so no fine cell is dropped for being
+small (nor kept where the reference drops it: the reference deactivates 939 of
+them). Implementing it needs refined pore volumes, which are father PORV × (child
+volume / father volume) — the same rule the PORV output now uses — and a seam to
+watch: the CpGrid level and opm-common's `EclipseGridLGR` must agree on which
+refined cells survive, or the output arrays mismatch.
 
 ## Not investigated
 
