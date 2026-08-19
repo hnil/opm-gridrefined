@@ -117,25 +117,45 @@ New decks live in `opm-tests/lgr/`, all derived from `SPE1CASE1_CARFIN1.DATA`.
 
 ---
 
-## B4-B6 — found on Norne, still open
+## B4-B6 — found on Norne
 
-**B4 `ENDFIN` block scoping is not honoured.** `CARFIN ... ENDFIN` brackets
-keywords meant for the refined block only. OPM does not recognise `ENDFIN`, so
-those keywords apply to the whole global grid. In `NORNE_LGR.DATA` the block's
-`MINPV 0.1` overrides the field's `MINPV 500`: the reference run deactivates 496
-cells and reports 44431 active, OPM keeps all 44927. Silent, and it changes the
-model.
+**B4 `ENDFIN` block scoping — FIXED 2026-08-19** (opm-common `90e172848`, and
+`6f92f6e18` for the consequence). `CARFIN ... ENDFIN` brackets keywords meant for
+the refined block only; OPM did not recognise `ENDFIN`, so they applied to the
+whole global grid — `NORNE_LGR.DATA`'s block `MINPV 0.1` overrode the field's
+`MINPV 500`, keeping the 496 cells the reference deactivates (44927 active vs the
+reference EGRID's 44431). Now the block's keywords carry an LGR scope
+(`DeckKeyword::lgrScope`) and are left out of the deck's global view and of every
+`DeckSection`, so both kinds of consumer — those that walk a section
+(`FieldProps`) and those that ask the deck for the last `MINPV` (`EclipseGrid`) —
+skip them. Norne now matches the reference: 44431 active, 496 removed, 0.015 %
+pore volume.
+
+That exposed a latent problem it had been hiding: the LGR tree recorded its
+refined ACTNUM and father lists once, at construction, while the grid the output
+code writes is a copy with MINPV applied. `EclipseGrid::resetACTNUM` now
+re-derives them (`inheritActiveCellsFromFather`, recursing through nested LGRs).
+
+**Block-local properties are still not implemented** — the block's keywords are
+scoped out, not applied to the refined cells, which inherit their father's
+values. Norne's `MINPV 0.1` inside the block is therefore ignored rather than
+honoured locally, so the refined region keeps ~97 more parent cells inactive than
+the reference does. The keywords remain in the deck's own keyword list, tagged,
+which is where an implementation should pick them up.
 
 **B5 Graded refinement (`NXFIN/NYFIN/NZFIN/HXFIN/HYFIN/HZFIN`) unimplemented.**
 The block is subdivided uniformly instead. Warned about since 2026-08-19; the
 geometry still differs from the deck's.
 
-**B6 `getParentIntersectionFromLgrBoundaryFace` picks the first same-side face.**
-A coarse cell whose boundary is faulted has several level-0 faces sharing one
-`indexInInside()`; the search returns whichever comes first, so the coarse-side
-face centre used for the transmissibility may come from the wrong sub-face.
-Pre-existing, and independent of the normal-convention fix that made the side
-itself correct.
+**B6 parent-intersection ambiguity — FIXED 2026-08-19** (opm-gridrefined
+`1320af28`). `getParentIntersectionFromLgrBoundaryFace` searched for a level-0
+face with the same `indexInInside()`; a faulted coarse cell has several, so the
+first match could be a face shared with a different cell, whose centre then set
+the interface's transmissibility. It now matches on the two cells' level-0
+ancestors, falling back to the side only where both leaf cells descend from one
+level-0 cell (no level-0 face exists between them). Regression test:
+`parentIntersectionFaultedLowSideBoundary` — two columns offset by half a cell
+with the LGR on the right — which fails 17 assertions against the old search.
 
 ## C. Parallel correctness / infrastructure
 
