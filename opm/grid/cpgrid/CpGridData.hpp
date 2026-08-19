@@ -82,6 +82,7 @@ namespace Opm
 class EclipseState;
 }
 namespace Opm { namespace Refinement { struct GridStateWriter; } }
+#include <opm/grid/cpgrid/refinement/RefinementRequest.hpp>
 #include <opm/grid/cpgrid/refinement/RetainedCornerPointInput.hpp>
 
 namespace Dune
@@ -787,6 +788,10 @@ private:
     std::vector<std::tuple<int,std::vector<int>>> parent_to_children_cells_;
     /** Amount of children cells per parent cell in each direction. */ // {# children in x-direction, ... y-, ... z-}
     std::array<int,3> cells_per_dim_;
+    /** Graded subdivision of this refined level: where each refined column
+        sits inside its parent cell, per direction. Empty for a uniform level
+        (and for level zero), where cells_per_dim_ says it all. */
+    std::array<Opm::Refinement::AxisSubdivision,3> subdivision_{};
     // SUITABLE ONLY FOR LEAFVIEW
     /** Relation between leafview and (possible different) level(s) cell indices. */ // {level, cell index in that level}
     std::vector<std::array<int,2>> leaf_to_level_cells_;

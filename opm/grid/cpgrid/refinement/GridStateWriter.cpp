@@ -43,6 +43,12 @@ void GridStateWriter::setCellsPerDim(Data& grid, const std::array<int,3>& cellsP
     grid.cells_per_dim_ = cellsPerDim;
 }
 
+void GridStateWriter::setSubdivision(Data& grid,
+                                     const std::array<Opm::Refinement::AxisSubdivision,3>& subdivision)
+{
+    grid.subdivision_ = subdivision;
+}
+
 void GridStateWriter::setParentRelations(Data& grid,
                                          std::vector<std::array<int,2>> childToParent,
                                          std::vector<int> idxInParent)

@@ -1828,6 +1828,11 @@ void CpGrid::addLgrsUpdateLeafView(const std::vector<std::array<int,3>>& cells_p
         requests[box].startIJK = startIJK_vec[box];
         requests[box].endIJK = endIJK_vec[box];
     }
+    addLgrsUpdateLeafView(std::move(requests));
+}
+
+void CpGrid::addLgrsUpdateLeafView(std::vector<Opm::Refinement::BlockRefinement> requests)
+{
     Opm::Refinement::validateBlockRefinements(requests);
 
     // In a distributed run the retained corner-point input exists only on
@@ -1898,7 +1903,7 @@ void CpGrid::addLgrsUpdateLeafView(const std::vector<std::array<int,3>>& cells_p
     const int preBuildMaxLevel = maxLevel();
     refinementBuilder->build(*this, requests);
 
-    for (std::size_t box = 0; box < numBoxes; ++box) {
+    for (std::size_t box = 0; box < requests.size(); ++box) {
         lgr_names_[requests[box].name] = preBuildMaxLevel + static_cast<int>(box) + 1;
     }
     if (global_id_set_ptr_) {

@@ -51,6 +51,7 @@
 #include <opm/grid/cpgrid/CpGridDataTraits.hpp>
 #include <opm/grid/cpgrid/DefaultGeometryPolicy.hpp>
 #include <opm/grid/cpgrid/OrientedEntityTable.hpp>
+#include <opm/grid/cpgrid/refinement/RefinementRequest.hpp>
 
 #include <opm/grid/cpgpreprocess/preprocess.h>
 
@@ -549,6 +550,13 @@ namespace Dune
                                    const std::vector<std::array<int,3>>& endIJK_vec,
                                    const std::vector<std::string>& lgr_name_vec,
                                    const std::vector<std::string>& lgr_parent_grid_name_vec = std::vector<std::string>{});
+
+        /// @brief Add LGRs from fully-formed refinement requests.
+        ///
+        /// The route for a graded box (N*FIN/H*FIN), whose subdivision cannot be
+        /// expressed as one factor per direction. The overload above builds
+        /// uniform requests and calls this.
+        void addLgrsUpdateLeafView(std::vector<Opm::Refinement::BlockRefinement> requests);
 
         /// @brief Global refine the grid with different refinement factors in each direction.
         ///

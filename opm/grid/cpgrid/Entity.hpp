@@ -572,7 +572,17 @@ Dune::cpgrid::Geometry<3,3> Dune::cpgrid::Entity<codim>::geometryInFather() cons
 
     auto idx_in_parent_cell = pgrid_ -> cell_to_idxInParentCell_[this->index()];
     if (idx_in_parent_cell !=-1) {
-        const auto& cells_per_dim =  (*(pgrid_ -> level_data_ptr_))[this->level()] -> cells_per_dim_;
+        const auto& level = *(*(pgrid_ -> level_data_ptr_))[this->level()];
+        if (!level.subdivision_[0].empty()) {
+            // Placing a child in the father's unit cube means knowing which of
+            // that father's columns it is, and a graded father's columns differ
+            // in size, so cells_per_dim cannot answer it. Reaching the tables
+            // from here needs a leaf-to-level mapping this method does not have.
+            OPM_THROW(std::logic_error,
+                      "geometryInFather() is not implemented for a graded refinement "
+                      "level (N*FIN/H*FIN).");
+        }
+        const auto& cells_per_dim = level.cells_per_dim_;
         const auto& auxArr = pgrid_ -> getReferenceRefinedCorners(idx_in_parent_cell, cells_per_dim);
         FieldVector<double, 3> corners_in_father_reference_elem_temp[8] =
             { auxArr[0], auxArr[1], auxArr[2], auxArr[3], auxArr[4], auxArr[5], auxArr[6], auxArr[7]};

@@ -38,13 +38,15 @@ struct LateralPos
     double frac;    // in [0, 1]
 };
 
-LateralPos lateralPos(int refinedIdx, int factor, int start, int numParentCells)
+// A refined line is the low edge of its own column, except the last, which
+// closes the previous one.
+LateralPos lateralPos(int refinedIdx, const Opm::Refinement::AxisSubdivision& sub, int start)
 {
-    if (refinedIdx == numParentCells * factor) {
-        return { start + numParentCells - 1, 1.0 };
+    const int last = static_cast<int>(sub.size()) - 1;
+    if (refinedIdx > last) {
+        return { start + sub.parentOffset[last], sub.fracHi[last] };
     }
-    return { start + refinedIdx / factor,
-             static_cast<double>(refinedIdx % factor) / factor };
+    return { start + sub.parentOffset[refinedIdx], sub.fracLo[refinedIdx] };
 }
 
 } // anonymous namespace
@@ -67,19 +69,18 @@ RefinedBlockGrdecl refineBlock(const std::array<int,3>& parentDims,
             throw std::invalid_argument("Refinement box '" + request.name
                                         + "' does not fit inside the parent dimensions.");
         }
-        if (request.cellsPerDim[c] < 1) {
+        if (request.subdivision[c].empty() && request.cellsPerDim[c] < 1) {
             throw std::invalid_argument("Refinement '" + request.name
                                         + "' has non-positive subdivisions.");
         }
     }
 
-    const std::array<int,3> boxDims = { request.endIJK[0] - request.startIJK[0],
-                                        request.endIJK[1] - request.startIJK[1],
-                                        request.endIJK[2] - request.startIJK[2] };
-    const std::array<int,3>& factors = request.cellsPerDim;
+    const std::array<Opm::Refinement::AxisSubdivision,3> subs = { axisSubdivision(request, 0),
+                                                axisSubdivision(request, 1),
+                                                axisSubdivision(request, 2) };
 
     RefinedBlockGrdecl out;
-    out.dims = { boxDims[0]*factors[0], boxDims[1]*factors[1], boxDims[2]*factors[2] };
+    out.dims = refinedDims(request);
 
     // --- COORD: sub-pillars ---------------------------------------------
     // Endpoint-wise bilinear interpolation of the four parent pillars
@@ -92,9 +93,9 @@ RefinedBlockGrdecl refineBlock(const std::array<int,3>& parentDims,
 
     out.coord.resize(6 * static_cast<std::size_t>(out.dims[0] + 1) * (out.dims[1] + 1));
     for (int jr = 0; jr <= out.dims[1]; ++jr) {
-        const auto [cj, b] = lateralPos(jr, factors[1], request.startIJK[1], boxDims[1]);
+        const auto [cj, b] = lateralPos(jr, subs[1], request.startIJK[1]);
         for (int ir = 0; ir <= out.dims[0]; ++ir) {
-            const auto [ci, a] = lateralPos(ir, factors[0], request.startIJK[0], boxDims[0]);
+            const auto [ci, a] = lateralPos(ir, subs[0], request.startIJK[0]);
 
             const double* p00 = parentPillar(ci,     cj);
             const double* p10 = parentPillar(ci + 1, cj);
@@ -123,21 +124,18 @@ RefinedBlockGrdecl refineBlock(const std::array<int,3>& parentDims,
 
     out.zcorn.resize(8 * static_cast<std::size_t>(out.dims[0]) * out.dims[1] * out.dims[2]);
     for (int kr = 0; kr < out.dims[2]; ++kr) {
-        const int ck = request.startIJK[2] + kr / factors[2];
-        const int kk = kr % factors[2];
+        const int ck = request.startIJK[2] + subs[2].parentOffset[kr];
         for (int jr = 0; jr < out.dims[1]; ++jr) {
-            const int cj = request.startIJK[1] + jr / factors[1];
-            const int jj = jr % factors[1];
+            const int cj = request.startIJK[1] + subs[1].parentOffset[jr];
             for (int ir = 0; ir < out.dims[0]; ++ir) {
-                const int ci = request.startIJK[0] + ir / factors[0];
-                const int ii = ir % factors[0];
+                const int ci = request.startIJK[0] + subs[0].parentOffset[ir];
 
                 for (int dk = 0; dk < 2; ++dk) {
-                    const double c = static_cast<double>(kk + dk) / factors[2];
+                    const double c = dk ? subs[2].fracHi[kr] : subs[2].fracLo[kr];
                     for (int dj = 0; dj < 2; ++dj) {
-                        const double b = static_cast<double>(jj + dj) / factors[1];
+                        const double b = dj ? subs[1].fracHi[jr] : subs[1].fracLo[jr];
                         for (int di = 0; di < 2; ++di) {
-                            const double a = static_cast<double>(ii + di) / factors[0];
+                            const double a = di ? subs[0].fracHi[ir] : subs[0].fracLo[ir];
 
                             double z = 0.0;
                             for (int pk = 0; pk < 2; ++pk) {
@@ -162,11 +160,11 @@ RefinedBlockGrdecl refineBlock(const std::array<int,3>& parentDims,
     out.actnum.assign(static_cast<std::size_t>(out.dims[0]) * out.dims[1] * out.dims[2], 1);
     if (actnum) {
         for (int kr = 0; kr < out.dims[2]; ++kr) {
-            const int ck = request.startIJK[2] + kr / factors[2];
+            const int ck = request.startIJK[2] + subs[2].parentOffset[kr];
             for (int jr = 0; jr < out.dims[1]; ++jr) {
-                const int cj = request.startIJK[1] + jr / factors[1];
+                const int cj = request.startIJK[1] + subs[1].parentOffset[jr];
                 for (int ir = 0; ir < out.dims[0]; ++ir) {
-                    const int ci = request.startIJK[0] + ir / factors[0];
+                    const int ci = request.startIJK[0] + subs[0].parentOffset[ir];
                     const std::size_t parentIdx = static_cast<std::size_t>(ci)
                         + static_cast<std::size_t>(nx)*cj
                         + static_cast<std::size_t>(nx)*ny*ck;

@@ -19,6 +19,8 @@
 #ifndef OPM_GRID_REFINEMENT_FAULTEDBOUNDARYFACES_HEADER_INCLUDED
 #define OPM_GRID_REFINEMENT_FAULTEDBOUNDARYFACES_HEADER_INCLUDED
 
+#include <opm/grid/cpgrid/refinement/RefinementRequest.hpp>
+
 #include <array>
 #include <vector>
 
@@ -35,7 +37,7 @@ struct BoundaryConnection
     int coarseNeighborCart{-1};      ///< parent Cartesian index of the coarse
                                      ///< neighbour, or -1 if this part of the box
                                      ///< boundary faces the domain (fault scarp)
-    std::array<int,3> coarseNeighborSub{}; ///< sub-position (0..cellsPerDim-1) of the
+    std::array<int,3> coarseNeighborSub{}; ///< sub-position within its parent of the
                                      ///< neighbour cell within its parent column, in
                                      ///< this box's refined frame. Valid when
                                      ///< coarseNeighborCart >= 0; lets the caller map
@@ -62,9 +64,7 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
                            const double* coord,
                            const double* zcorn,
                            const int* actnum,
-                           const std::array<int,3>& boxStartIJK,
-                           const std::array<int,3>& boxEndIJK,
-                           const std::array<int,3>& cellsPerDim,
+                           const BlockRefinement& box,
                            int axis,
                            int side,
                            bool edgeConformal);

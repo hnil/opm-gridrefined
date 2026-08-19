@@ -39,9 +39,7 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
                            const double* coord,
                            const double* zcorn,
                            const int* actnum,
-                           const std::array<int,3>& boxStartIJK,
-                           const std::array<int,3>& boxEndIJK,
-                           const std::array<int,3>& cellsPerDim,
+                           const BlockRefinement& box,
                            int axis,
                            int side,
                            bool edgeConformal)
@@ -53,6 +51,9 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
     // throws the boundary onto a coarse cell outside the box footprint is still
     // captured. Refining box+shell+halo and processing reproduces the box's
     // boundary faces against the coarse neighbour(s), split at the fault.
+    const std::array<int,3>& boxStartIJK = box.startIJK;
+    const std::array<int,3>& boxEndIJK   = box.endIJK;
+
     std::array<int,3> miniStart = boxStartIJK;
     std::array<int,3> miniEnd   = boxEndIJK;
     if (side < 0) {
@@ -73,11 +74,43 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
         miniEnd[p]   = std::min(parentDims[p], miniEnd[p] + 1);
     }
 
+    // The mini block keeps the box's own subdivision on the box's parent cells
+    // and refines the surrounding shell uniformly, as before -- the shell's
+    // resolution is what lets a box<->box faulted interface identify the
+    // neighbour's child.
     BlockRefinement req;
     req.name = "FAULTBND";
-    req.cellsPerDim = cellsPerDim;
+    req.cellsPerDim = box.cellsPerDim;
     req.startIJK = miniStart;
     req.endIJK = miniEnd;
+    for (int d = 0; d < 3; ++d) {
+        const auto boxSub = axisSubdivision(box, d);
+        const auto boxPos = axisPositions(boxSub);
+
+        AxisSubdivision mini;
+        for (int p = miniStart[d]; p < miniEnd[d]; ++p) {
+            const int parent = p - miniStart[d];
+            const bool inside = (p >= boxStartIJK[d]) && (p < boxEndIJK[d]);
+            const int first = inside ? boxPos.firstColumn[p - boxStartIJK[d]] : 0;
+            const int count = inside ? boxPos.parentCount[first] : box.cellsPerDim[d];
+
+            for (int sub = 0; sub < count; ++sub) {
+                mini.parentOffset.push_back(parent);
+                mini.fracLo.push_back(inside ? boxSub.fracLo[first + sub]
+                                             : static_cast<double>(sub) / count);
+                mini.fracHi.push_back(inside ? boxSub.fracHi[first + sub]
+                                             : static_cast<double>(sub + 1) / count);
+            }
+        }
+        req.subdivision[d] = std::move(mini);
+    }
+
+    const auto miniSub = std::array { axisSubdivision(req, 0),
+                                      axisSubdivision(req, 1),
+                                      axisSubdivision(req, 2) };
+    const auto miniPos = std::array { axisPositions(miniSub[0]),
+                                      axisPositions(miniSub[1]),
+                                      axisPositions(miniSub[2]) };
 
     const RefinedBlockGrdecl refined = refineBlock(parentDims, coord, zcorn, actnum, req);
     const std::array<int,3> mdims = refined.dims;
@@ -102,8 +135,8 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
     std::array<int,3> boxOffset{};
     std::array<int,3> boxRefDims{};
     for (int d = 0; d < 3; ++d) {
-        boxOffset[d]  = (boxStartIJK[d] - miniStart[d]) * cellsPerDim[d];
-        boxRefDims[d] = (boxEndIJK[d] - boxStartIJK[d]) * cellsPerDim[d];
+        boxOffset[d]  = miniPos[d].firstColumn[boxStartIJK[d] - miniStart[d]];
+        boxRefDims[d] = static_cast<int>(axisSubdivision(box, d).size());
     }
     const int boundaryLayer = (side < 0) ? 0 : boxRefDims[axis] - 1;
 
@@ -114,9 +147,9 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
                                   g / (mdims[0] * mdims[1]) };
     };
     const auto parentOfMini = [&](const std::array<int,3>& L) {
-        return std::array<int,3>{ miniStart[0] + L[0] / cellsPerDim[0],
-                                  miniStart[1] + L[1] / cellsPerDim[1],
-                                  miniStart[2] + L[2] / cellsPerDim[2] };
+        return std::array<int,3>{ miniStart[0] + miniSub[0].parentOffset[L[0]],
+                                  miniStart[1] + miniSub[1].parentOffset[L[1]],
+                                  miniStart[2] + miniSub[2].parentOffset[L[2]] };
     };
     const auto inBox = [&](const std::array<int,3>& p) {
         return p[0] >= boxStartIJK[0] && p[0] < boxEndIJK[0]
@@ -163,7 +196,7 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
             // box's refined frame); identifies the neighbour's refined child when
             // it is itself refined.
             for (int d = 0; d < 3; ++d) {
-                coarseSub[d] = oL[d] % cellsPerDim[d];
+                coarseSub[d] = miniPos[d].subIndex[oL[d]];
             }
         }
 

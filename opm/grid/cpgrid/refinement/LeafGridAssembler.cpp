@@ -163,6 +163,9 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     {
         CpGridData* level;
         std::array<int,3> factors;
+        std::array<AxisSubdivision,3> subs;
+        std::array<AxisPositions,3> pos;
+        bool graded{false};
         std::array<int,3> refinedDims;
         // children of each level-zero parent, ordered by idxInParent
         std::map<int, std::vector<int>> childrenOfParent;
@@ -180,6 +183,11 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         BoxData& box = boxes[b];
         box.level = storage[b + 1].get();
         box.factors = requests[b].cellsPerDim;
+        for (int d = 0; d < 3; ++d) {
+            box.subs[d] = axisSubdivision(requests[b], d);
+            box.pos[d] = axisPositions(box.subs[d]);
+            box.graded = box.graded || !requests[b].subdivision[d].empty();
+        }
         box.refinedDims = box.level->logicalCartesianSize();
 
         const auto& childToParent = GridStateWriter::childToParent(*box.level);
@@ -200,24 +208,39 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         // Corner identification with level zero, through the parent cells
         // (per-cell identification stays consistent across faults inside
         // the block, where lattice positions are not unique).
-        const auto& [rx, ry, rz] = box.factors;
+        // A refined corner coincides with a parent corner when it sits on the
+        // parent's boundary in all three directions. Taken from the cell's
+        // refined lattice position rather than from idxInParent, whose strides
+        // are that parent's own counts once the box is graded.
         box.cornerEquiv.assign(box.level->size(3), -1);
         auto& cellToPointL = GridStateWriter::cellToPoint(*box.level);
+        const auto& rd = box.refinedDims;
         for (int cell = 0; cell < box.level->size(0); ++cell) {
             const int parent = childToParent[cell][1];
-            const int pos = idxInParent[cell];
-            const int ii = pos % rx;
-            const int jj = (pos / rx) % ry;
-            const int kk = pos / (rx*ry);
+            const int refinedCart = box.level->globalCell()[cell];
+            const std::array<int,3> lattice = { refinedCart % rd[0],
+                                                (refinedCart / rd[0]) % rd[1],
+                                                refinedCart / (rd[0]*rd[1]) };
             for (int corner = 0; corner < 8; ++corner) {
-                const int di = corner & 1;
-                const int dj = (corner >> 1) & 1;
-                const int dk = (corner >> 2) & 1;
-                if ((ii + di) % rx == 0 && (jj + dj) % ry == 0 && (kk + dk) % rz == 0) {
-                    const int pdi = (ii + di) / rx;
-                    const int pdj = (jj + dj) / ry;
-                    const int pdk = (kk + dk) / rz;
-                    const int parentCorner = cellToPoint0[parent][pdi + 2*pdj + 4*pdk];
+                const std::array<int,3> d = { corner & 1, (corner >> 1) & 1, (corner >> 2) & 1 };
+                std::array<int,3> parentCornerIJK{};
+                bool onParentCorner = true;
+                for (int c = 0; c < 3 && onParentCorner; ++c) {
+                    const int edge = box.pos[c].subIndex[lattice[c]] + d[c];
+                    if (edge == 0) {
+                        parentCornerIJK[c] = 0;
+                    }
+                    else if (edge == box.pos[c].parentCount[lattice[c]]) {
+                        parentCornerIJK[c] = 1;
+                    }
+                    else {
+                        onParentCorner = false;
+                    }
+                }
+                if (onParentCorner) {
+                    const int parentCorner = cellToPoint0[parent][parentCornerIJK[0]
+                                                                 + 2*parentCornerIJK[1]
+                                                                 + 4*parentCornerIJK[2]];
                     box.cornerEquiv[cellToPointL[cell][corner]] = parentCorner;
                 }
             }
@@ -513,6 +536,14 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                         // 2-D face; its in-face directions are the two axes
                         // other than `axis` (the perpendicular touch direction).
                         const int nbBox = boxOfCell[neighbor];
+                        if (box.graded || boxes[nbBox].graded) {
+                            // The conformity rule below compares one subdivision
+                            // factor per in-face direction; a graded box has a
+                            // column-by-column subdivision instead.
+                            throw std::invalid_argument(
+                                "Refinement boxes touch and at least one is graded "
+                                "(N*FIN/H*FIN). Touching graded boxes are not supported.");
+                        }
                         const auto& facA = box.factors;
                         const auto& facB = boxes[nbBox].factors;
                         const int u = (axis == 0) ? 1 : 0;
@@ -696,8 +727,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
 
         for (const auto& [b, axis, side] : faultedSides) {
             const auto conns = faultedBoundaryConnections(
-                parentDims, coord, zcorn, actnum,
-                requests[b].startIJK, requests[b].endIJK, requests[b].cellsPerDim,
+                parentDims, coord, zcorn, actnum, requests[b],
                 axis, side, /*edgeConformal=*/true);
             const auto& rd = boxes[b].refinedDims;
             for (const auto& conn : conns) {
@@ -740,6 +770,16 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                         }
                         const int u = (axis == 0) ? 1 : 0;
                         const int v = (axis == 2) ? 1 : 2;
+                        if (boxes[b].graded || boxes[nbBox].graded) {
+                            // Pairing the two sides' sub-faces below compares one
+                            // subdivision factor per in-face direction, which a
+                            // graded box does not have.
+                            throw std::invalid_argument(
+                                "Refinement '" + requests[b].name + "' meets '"
+                                + requests[nbBox].name + "' across a fault, and at least "
+                                "one of them is graded (N*FIN/H*FIN). Box-to-box "
+                                "interfaces between graded boxes are not supported.");
+                        }
                         const auto& facThis = boxes[b].factors;
                         const auto& facN    = boxes[nbBox].factors;
                         if (facThis[u] == facN[u] && facThis[v] == facN[v]) {
@@ -1103,6 +1143,7 @@ assembleNestedLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     {
         CpGridData* level;
         std::array<int,3> factors;
+        std::array<AxisPositions,3> pos;
         std::array<int,3> refinedDims;
         std::map<int, std::vector<int>> childrenOfParent;  // parent cell (in parent grid) -> children
         std::vector<int> cornerEquiv;                      // level corner -> parent leaf corner (or -1)
@@ -1119,6 +1160,9 @@ assembleNestedLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         BoxData& box = boxes[b];
         box.level = storage[b + 1].get();
         box.factors = requests[b].cellsPerDim;
+        for (int d = 0; d < 3; ++d) {
+            box.pos[d] = axisPositions(axisSubdivision(requests[b], d));
+        }
         box.refinedDims = box.level->logicalCartesianSize();
         const auto& childToParent = GridStateWriter::childToParent(*box.level);
         const auto& idxInParent = GridStateWriter::idxInParent(*box.level);
@@ -1222,27 +1266,41 @@ assembleNestedLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         CpGridData& pgrid = parentGridOf(b);
         auto& parentCellToPoint = GridStateWriter::cellToPoint(pgrid);
         const auto& childToParent = GridStateWriter::childToParent(*box.level);
-        const auto& idxInParent = GridStateWriter::idxInParent(*box.level);
         auto& cellToPointL = GridStateWriter::cellToPoint(*box.level);
-        const auto& [rx, ry, rz] = box.factors;
 
-        // Per-cell corner identification against the PARENT grid (level0 or a box).
+        // Per-cell corner identification against the PARENT grid (level0 or a
+        // box): a refined corner coincides with a parent corner when it sits on
+        // the parent's boundary in all three directions. Read from the cell's
+        // refined lattice position, whose relation to the parent holds whether
+        // or not the box is graded.
+        const auto& rdb = box.refinedDims;
         box.cornerEquiv.assign(box.level->size(3), -1);
         for (int cell = 0; cell < box.level->size(0); ++cell) {
             const int parent = childToParent[cell][1];
-            const int pos = idxInParent[cell];
-            const int ii = pos % rx;
-            const int jj = (pos / rx) % ry;
-            const int kk = pos / (rx*ry);
+            const int refinedCart = box.level->globalCell()[cell];
+            const std::array<int,3> lattice = { refinedCart % rdb[0],
+                                                (refinedCart / rdb[0]) % rdb[1],
+                                                refinedCart / (rdb[0]*rdb[1]) };
             for (int corner = 0; corner < 8; ++corner) {
-                const int di = corner & 1;
-                const int dj = (corner >> 1) & 1;
-                const int dk = (corner >> 2) & 1;
-                if ((ii + di) % rx == 0 && (jj + dj) % ry == 0 && (kk + dk) % rz == 0) {
-                    const int pdi = (ii + di) / rx;
-                    const int pdj = (jj + dj) / ry;
-                    const int pdk = (kk + dk) / rz;
-                    const int parentCorner = parentCellToPoint[parent][pdi + 2*pdj + 4*pdk];
+                const std::array<int,3> d = { corner & 1, (corner >> 1) & 1, (corner >> 2) & 1 };
+                std::array<int,3> parentCornerIJK{};
+                bool onParentCorner = true;
+                for (int c = 0; c < 3 && onParentCorner; ++c) {
+                    const int edge = box.pos[c].subIndex[lattice[c]] + d[c];
+                    if (edge == 0) {
+                        parentCornerIJK[c] = 0;
+                    }
+                    else if (edge == box.pos[c].parentCount[lattice[c]]) {
+                        parentCornerIJK[c] = 1;
+                    }
+                    else {
+                        onParentCorner = false;
+                    }
+                }
+                if (onParentCorner) {
+                    const int parentCorner = parentCellToPoint[parent][parentCornerIJK[0]
+                                                                      + 2*parentCornerIJK[1]
+                                                                      + 4*parentCornerIJK[2]];
                     box.cornerEquiv[cellToPointL[cell][corner]] = parentCornerLeaf(b, parentCorner);
                 }
             }

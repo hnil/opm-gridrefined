@@ -86,7 +86,12 @@ assembleBlockLevelGrid(const Dune::cpgrid::CpGridData& parentGrid,
     // Stage 6a: parent relations. The processed grid's global_cell_ holds
     // the refined-local Cartesian index (the CARFIN convention for level
     // grids), which encodes the parent and the position inside it.
-    const auto& [rx, ry, rz] = request.cellsPerDim;
+    const std::array<AxisSubdivision,3> subs = { axisSubdivision(request, 0),
+                                                axisSubdivision(request, 1),
+                                                axisSubdivision(request, 2) };
+    const std::array<AxisPositions,3> pos = { axisPositions(subs[0]),
+                                              axisPositions(subs[1]),
+                                              axisPositions(subs[2]) };
     const auto& [nx, ny, nz] = parentDims;
 
     // Invert the parent grid's cartesian -> compressed mapping. For a
@@ -110,9 +115,9 @@ assembleBlockLevelGrid(const Dune::cpgrid::CpGridData& parentGrid,
         const int jr = (refinedCart / refined.dims[0]) % refined.dims[1];
         const int kr = refinedCart / (refined.dims[0]*refined.dims[1]);
 
-        const int ci = request.startIJK[0] + ir / rx;
-        const int cj = request.startIJK[1] + jr / ry;
-        const int ck = request.startIJK[2] + kr / rz;
+        const int ci = request.startIJK[0] + subs[0].parentOffset[ir];
+        const int cj = request.startIJK[1] + subs[1].parentOffset[jr];
+        const int ck = request.startIJK[2] + subs[2].parentOffset[kr];
         const int parentCart = ci + nx*cj + nx*ny*ck;
         const int parentIdx = parentCompressed[parentCart];
         if (parentIdx < 0) {
@@ -121,12 +126,23 @@ assembleBlockLevelGrid(const Dune::cpgrid::CpGridData& parentGrid,
             throw std::logic_error("Refined cell in '" + request.name
                                    + "' has no active parent cell.");
         }
+        // Position within the parent, whose extent varies from parent to parent
+        // once the box is graded, so the strides are that parent's own counts.
+        const int cx = pos[0].parentCount[ir];
+        const int cy = pos[1].parentCount[jr];
         childToParent[cell] = {parentLevel, parentIdx};
-        idxInParent[cell] = (ir % rx) + (jr % ry)*rx + (kr % rz)*rx*ry;
+        idxInParent[cell] = pos[0].subIndex[ir]
+                          + pos[1].subIndex[jr]*cx
+                          + pos[2].subIndex[kr]*cx*cy;
     }
 
     GridStateWriter::setLevel(*level, levelIndex);
     GridStateWriter::setCellsPerDim(*level, request.cellsPerDim);
+    // Only a graded box stores its tables; a uniform level keeps to
+    // cells_per_dim, which everything reading it already understands.
+    if (std::ranges::any_of(request.subdivision, [](const auto& s) { return !s.empty(); })) {
+        GridStateWriter::setSubdivision(*level, subs);
+    }
     GridStateWriter::setParentRelations(*level, std::move(childToParent), std::move(idxInParent));
 
     // Expose the resampled description so a nested child can be refined from
@@ -147,13 +163,14 @@ assembleEmptyLevelGrid(const BlockRefinement& request,
     (void)comm;
     auto level = std::make_shared<Dune::cpgrid::CpGridData>(
         Dune::MPIHelper::getLocalCommunicator(), levelStorage);
-    const std::array<int,3> refinedDims = {
-        (request.endIJK[0] - request.startIJK[0]) * request.cellsPerDim[0],
-        (request.endIJK[1] - request.startIJK[1]) * request.cellsPerDim[1],
-        (request.endIJK[2] - request.startIJK[2]) * request.cellsPerDim[2] };
     GridStateWriter::setLevel(*level, levelIndex);
     GridStateWriter::setCellsPerDim(*level, request.cellsPerDim);
-    GridStateWriter::setLogicalCartesianSize(*level, refinedDims);
+    if (std::ranges::any_of(request.subdivision, [](const auto& s) { return !s.empty(); })) {
+        GridStateWriter::setSubdivision(*level, { axisSubdivision(request, 0),
+                                                  axisSubdivision(request, 1),
+                                                  axisSubdivision(request, 2) });
+    }
+    GridStateWriter::setLogicalCartesianSize(*level, Opm::Refinement::refinedDims(request));
     GridStateWriter::setGlobalCell(*level, {});
     GridStateWriter::setIndexSet(*level, 0, 0);
     GridStateWriter::setParentRelations(*level, {}, {});
