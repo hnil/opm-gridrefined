@@ -145,7 +145,10 @@ which is where an implementation should pick them up.
 
 **B5 Graded refinement (`NXFIN/NYFIN/NZFIN/HXFIN/HYFIN/HZFIN`) unimplemented.**
 The block is subdivided uniformly instead. Warned about since 2026-08-19; the
-geometry still differs from the deck's.
+geometry still differs from the deck's. Surveyed in
+[`GRADED-REFINEMENT.md`](GRADED-REFINEMENT.md): the keyword semantics validated
+against Norne, the sites that assume one integer factor per direction, and why
+block-local `MINPV` has to come first rather than after.
 
 **B6 parent-intersection ambiguity — FIXED 2026-08-19** (opm-gridrefined
 `1320af28`). `getParentIntersectionFromLgrBoundaryFace` searched for a level-0
