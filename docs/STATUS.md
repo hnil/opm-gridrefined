@@ -6,6 +6,7 @@ Companion docs: `lgr_review.md` (review), `PLAN.md` (roadmap), `LGR_GAPS.md`
 `NESTED_LGR_PLAN.md`/`NESTED_LGR_TESTING.md`, `REFINE_BEFORE_REDISTRIBUTE.md`,
 `DESIGN-parallel-octree.md`/`DESIGN-builder.md` (AdaptiveCpGrid design),
 `REFINEMENT-ALGORITHM.md` (builder pipeline, file:line walk-through),
+`GRADED-REFINEMENT.md` (what NXFIN/HXFIN would take),
 `UPSTREAM_TEST_PORTING.md` (which upstream LGR tests transfer and why), and
 `RUNNING.md` (workspace root, full build/run/test guide).
 
