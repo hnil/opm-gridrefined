@@ -168,6 +168,14 @@ level-0 cell (no level-0 face exists between them). Regression test:
 `parentIntersectionFaultedLowSideBoundary` — two columns offset by half a cell
 with the LGR on the right — which fails 17 assertions against the old search.
 
+**B7 parallel LGR on a field grid — FIXED 2026-08-19** (opm-gridrefined
+`d42b7530`, opm-simulators `ed3f9a631`). Two blockers, both comparing an active
+count against a Cartesian one, both unreachable from the all-active test decks:
+`classifyBox()` could never call a box with an inactive cell rank-interior, and
+the I/O reference grid skipped MINPV/PINCH because it was processed without an
+EclipseState. Norne's graded CARFIN now runs at np=2 with an EGRID identical to
+serial's. See `STATUS.md`.
+
 ## C. Parallel correctness / infrastructure
 
 | # | Gap | Notes |
