@@ -176,6 +176,24 @@ the I/O reference grid skipped MINPV/PINCH because it was processed without an
 EclipseState. Norne's graded CARFIN now runs at np=2 with an EGRID identical to
 serial's. See `STATUS.md`.
 
+**B8 restart with an LGR — refused, verified 2026-08-19.** A restart deck built
+from Norne's graded CARFIN run stops with "Refined grids are not yet supported
+for restart" (`FlowProblemBlackoil::readEclRestartSolution_`, a blanket guard on
+`grid().maxLevel() > 0`). A clean refusal, not a wrong answer. Restart *without*
+an LGR is unaffected: the same deck without CARFIN restarts from step 101 and
+runs to the end.
+
+What it would take: the writer already splits the solution across levels
+(`extractRestartValueLevelGrids` + `mapLevelIndicesToCartesianOutputOrder` in
+`LgrOutputHelpers.hpp`); reading needs the inverse — load every per-level
+solution section and reassemble it in leaf order, after which the existing
+`setRestart(..., globalIdx)` indexing works unchanged. opm-common has a
+`test_RestartLGR`, so some of the file-format side may already be there.
+
+**Aside, not LGR:** `rst_deck` crashes with `std::out_of_range` on Norne, with or
+without the LGR, and on the untouched `builds/release` binary too. Restart decks
+for Norne have to be written by hand.
+
 ## C. Parallel correctness / infrastructure
 
 | # | Gap | Notes |
