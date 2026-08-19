@@ -81,6 +81,7 @@ branch (separate, not pushed in this round).
 | **AdaptiveCpGrid** (post-construction local refinement) | ✓ first-cut | mark→adapt == static LGR; re-adapt + cell-by-cell; full-rebuild oracle (in-place mutation deferred) |
 | **Dune `globalRefine`/`autoRefine`** | ✓ | wired to the builder: `globalRefine(n)`=whole-grid 2^n; `autoRefine(nxnynz)`=arbitrary odd division as one LGR |
 | Parallel rank-interior single-level LGR | ✓ | CARFIN1 np2; mass balance matches serial |
+| **Parallel LGR on a field grid** | ✓ | Norne graded CARFIN at np2: 434 steps / 2426 Newton vs serial 434 / 2463; EGRID identical to serial and to the reference; field rates within 0.3 % of serial |
 | LGR ECL output (serial + parallel cell/restart) | ✓ | EGRID/INIT/UNRST consistent, ResInsight-ready |
 | **INIT/restart LGR arrays on a grid with inactive cells** | ✓ | active-sized arrays now use the father's *active* index; PORV stays Cartesian |
 | **Field-props correct on refined cells** | ✓ | EQLNUM/PVTNUM/SWATINIT (equil), FIPNUM/FPR, datum-region pressure — via LookUpData leaf-mapping |
@@ -202,6 +203,24 @@ Two further fixes followed (B4, B6 in `LGR_GAPS.md`), and with them the run is
 5. **`getParentIntersectionFromLgrBoundaryFace` matched on the face's side
    alone**, which a faulted coarse cell does not determine uniquely. It matches
    on the two cells' level-0 ancestors now, with a new faulted regression deck.
+
+### Parallel (2026-08-19)
+
+Norne's graded CARFIN needed two fixes before it would run at np>1, both of the
+active-versus-Cartesian family and both invisible to the all-active test decks:
+
+- `classifyBox()` called a box rank-interior only when the rank's *active*
+  interior count equalled the box's *Cartesian* extent, which no box containing
+  an inactive cell can satisfy (Norne: 2662 against 2039, with 1942 owned). It
+  now classifies on partition type alone — a rank that owns every box cell it
+  sees and sees none it does not own holds the whole box.
+- The I/O rank's reference grid was processed with a null `EclipseState`, and
+  `processEclipseFormat` gates MINPV and PINCH on having one. It kept 44927 cells
+  against the simulation grid's 44431, leaving 399 claimed by no rank (496 MINPV
+  removals less the 97 inside the box, which the box refines away) and tripping
+  the `rank>=0` assertion in `DistributeIndexMapping` — silently incomplete in an
+  NDEBUG build. It is now built from the retained post-MINPV corner-point
+  description the simulation grid itself came from.
 
 ## Remaining gaps (details in `LGR_GAPS.md`)
 
