@@ -60,6 +60,12 @@ struct BlockRefinement
     std::array<int,3> endIJK{};
     /// Graded subdivision, one entry per direction. Empty means uniform.
     std::array<AxisSubdivision,3> subdivision{};
+    /// Refined cells the block's own MINPV removes, one entry per refined
+    /// Cartesian cell (1 = removed). Empty when the block set no MINPV.
+    /// Decided in opm-common, where the father's pore volume lives, so that the
+    /// simulation grid and the LGR grids written to the EGRID agree on which
+    /// refined cells exist.
+    std::vector<int> minpvRemoved{};
 };
 
 /// The request's subdivision in one direction, uniform tables filled in when

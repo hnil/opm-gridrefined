@@ -177,6 +177,19 @@ RefinedBlockGrdecl refineBlock(const std::array<int,3>& parentDims,
         }
     }
 
+    // ... and the block's own MINPV takes out what it takes out.
+    if (! request.minpvRemoved.empty()) {
+        if (request.minpvRemoved.size() != out.actnum.size()) {
+            throw std::invalid_argument("Refinement '" + request.name
+                                        + "' has a MINPV removal mask of the wrong size.");
+        }
+        for (std::size_t cell = 0; cell < out.actnum.size(); ++cell) {
+            if (request.minpvRemoved[cell]) {
+                out.actnum[cell] = 0;
+            }
+        }
+    }
+
     return out;
 }
 
