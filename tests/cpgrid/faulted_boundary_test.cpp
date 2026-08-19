@@ -99,7 +99,7 @@ BOOST_AUTO_TEST_CASE(faultedIBoundarySplitsConnections)
 
     const auto conns = Opm::Refinement::faultedBoundaryConnections(
         g.dims, g.coord.data(), g.zcorn.data(), nullptr,
-        {2,0,0}, {4,2,2}, {2,2,2}, /*axis=*/0, /*side=*/-1, /*edgeConformal=*/false);
+        Opm::Refinement::BlockRefinement{ "BOX", "GLOBAL", {2,2,2}, {2,0,0}, {4,2,2} }, /*axis=*/0, /*side=*/-1, /*edgeConformal=*/false);
 
     BOOST_REQUIRE(!conns.empty());
 
@@ -141,7 +141,7 @@ BOOST_AUTO_TEST_CASE(unfaultedBoundaryGivesOneToOne)
 
     const auto conns = Opm::Refinement::faultedBoundaryConnections(
         g.dims, g.coord.data(), g.zcorn.data(), nullptr,
-        {2,0,0}, {4,2,2}, {2,2,2}, /*axis=*/0, /*side=*/+1, /*edgeConformal=*/false);
+        Opm::Refinement::BlockRefinement{ "BOX", "GLOBAL", {2,2,2}, {2,0,0}, {4,2,2} }, /*axis=*/0, /*side=*/+1, /*edgeConformal=*/false);
 
     BOOST_REQUIRE(!conns.empty());
 
@@ -166,7 +166,7 @@ BOOST_AUTO_TEST_CASE(domainBoundarySideHasNoConnections)
 
     const auto conns = Opm::Refinement::faultedBoundaryConnections(
         g.dims, g.coord.data(), g.zcorn.data(), nullptr,
-        {2,0,0}, {4,2,2}, {2,2,2}, /*axis=*/1, /*side=*/-1, /*edgeConformal=*/false);
+        Opm::Refinement::BlockRefinement{ "BOX", "GLOBAL", {2,2,2}, {2,0,0}, {4,2,2} }, /*axis=*/1, /*side=*/-1, /*edgeConformal=*/false);
 
     BOOST_CHECK(conns.empty());
 }

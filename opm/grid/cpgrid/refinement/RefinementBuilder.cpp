@@ -66,6 +66,75 @@ std::unique_ptr<Builder> setBuilder(std::unique_ptr<Builder> newBuilder)
     return previous;
 }
 
+AxisSubdivision axisSubdivision(const BlockRefinement& request, const int dim)
+{
+    if (! request.subdivision[dim].empty()) {
+        return request.subdivision[dim];
+    }
+
+    const int nparent = request.endIJK[dim] - request.startIJK[dim];
+    const int factor = request.cellsPerDim[dim];
+
+    AxisSubdivision uniform;
+    uniform.parentOffset.reserve(nparent * factor);
+    uniform.fracLo.reserve(nparent * factor);
+    uniform.fracHi.reserve(nparent * factor);
+
+    for (int parent = 0; parent < nparent; ++parent) {
+        for (int sub = 0; sub < factor; ++sub) {
+            uniform.parentOffset.push_back(parent);
+            uniform.fracLo.push_back(static_cast<double>(sub) / factor);
+            uniform.fracHi.push_back(static_cast<double>(sub + 1) / factor);
+        }
+    }
+
+    return uniform;
+}
+
+AxisPositions axisPositions(const AxisSubdivision& sub)
+{
+    const auto n = sub.size();
+
+    AxisPositions pos;
+    pos.subIndex.resize(n);
+    pos.parentCount.resize(n);
+
+    // parentOffset is non-decreasing, so each parent's columns are one run.
+    std::size_t column = 0;
+    while (column < n) {
+        const int parent = sub.parentOffset[column];
+
+        std::size_t end = column;
+        while ((end < n) && (sub.parentOffset[end] == parent)) {
+            ++end;
+        }
+
+        pos.firstColumn.resize(parent + 1, static_cast<int>(column));
+        pos.firstColumn[parent] = static_cast<int>(column);
+
+        const int count = static_cast<int>(end - column);
+        for (auto c = column; c < end; ++c) {
+            pos.subIndex[c] = static_cast<int>(c - column);
+            pos.parentCount[c] = count;
+        }
+
+        column = end;
+    }
+
+    return pos;
+}
+
+std::array<int,3> refinedDims(const BlockRefinement& request)
+{
+    std::array<int,3> dims{};
+    for (int d = 0; d < 3; ++d) {
+        dims[d] = request.subdivision[d].empty()
+            ? (request.endIJK[d] - request.startIJK[d]) * request.cellsPerDim[d]
+            : static_cast<int>(request.subdivision[d].size());
+    }
+    return dims;
+}
+
 void validateBlockRefinements(const std::vector<BlockRefinement>& requests)
 {
     for (const auto& req : requests) {
@@ -81,9 +150,17 @@ void validateBlockRefinements(const std::vector<BlockRefinement>& requests)
                 throw std::invalid_argument("Invalid IJK box in refinement '" + req.name
                                             + "': end I/J/K must be larger than start I/J/K (and start non-negative).");
             }
-            if (req.cellsPerDim[c] < 1) {
+            if (req.subdivision[c].empty() && req.cellsPerDim[c] < 1) {
                 throw std::invalid_argument("Invalid subdivisions in refinement '" + req.name
                                             + "': NX/NY/NZ must be positive.");
+            }
+            if (!req.subdivision[c].empty()
+                && (req.subdivision[c].fracLo.size() != req.subdivision[c].size()
+                    || req.subdivision[c].fracHi.size() != req.subdivision[c].size()))
+            {
+                throw std::invalid_argument("Refinement '" + req.name
+                                            + "' has a graded subdivision whose extent tables "
+                                              "do not match its column count.");
             }
         }
     }

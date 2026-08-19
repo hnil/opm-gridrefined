@@ -24,6 +24,8 @@
 
 #include <memory>
 
+#include <opm/grid/cpgrid/refinement/RefinementRequest.hpp>
+
 #include <array>
 #include <tuple>
 #include <vector>
@@ -48,6 +50,13 @@ struct GridStateWriter
 
     /// Set the per-parent subdivision factors of a refined level grid.
     static void setCellsPerDim(Data& grid, const std::array<int,3>& cellsPerDim);
+
+    /// Set a refined level's graded subdivision: where each of its refined
+    /// columns sits inside its parent cell, per direction. cells_per_dim_ only
+    /// describes a uniform box, so this is what geometryInFather() needs once
+    /// the columns differ in size.
+    static void setSubdivision(Data& grid,
+                               const std::array<Opm::Refinement::AxisSubdivision,3>& subdivision);
 
     /// Set the parent relations of a refined level or leaf grid:
     /// childToParent[c] = {parent level, parent cell index} ({-1,-1} for

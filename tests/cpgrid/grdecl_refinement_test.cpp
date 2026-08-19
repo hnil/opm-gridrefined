@@ -445,3 +445,88 @@ BOOST_AUTO_TEST_CASE(inactiveParentsProduceInactiveChildren)
     refinedGrid.processEclipseFormat(rawRefined, false);
     BOOST_CHECK_EQUAL(refinedGrid.size(0), 3*2*1*8 - 8);
 }
+
+// N*FIN/H*FIN: how many refined columns each parent cell takes, and their
+// relative widths within it.
+BOOST_AUTO_TEST_CASE(gradedRefinementFollowsColumnTables)
+{
+    auto parent = makeVerticalPillarGrid({4, 3, 3}, [](int, int, int k_) {
+        return static_cast<double>(cellOf(k_) + sideOf(k_));
+    });
+
+    // Box spans parent cells i = 1..2. The first takes one column, the second
+    // three with widths 1 : 2 : 1 -- so x runs 1, 2, 2.25, 2.75, 3.
+    Opm::Refinement::BlockRefinement req;
+    req.name = "GRADED";
+    req.cellsPerDim = {1, 1, 1};
+    req.startIJK = {1, 1, 1};
+    req.endIJK = {3, 2, 3};
+    req.subdivision[0] = Opm::Refinement::AxisSubdivision{
+        /* parentOffset = */ {0, 1, 1, 1},
+        /* fracLo       = */ {0.0, 0.0,  0.25, 0.75},
+        /* fracHi       = */ {1.0, 0.25, 0.75, 1.0} };
+
+    const auto refined = Opm::Refinement::refineBlock(parent.dims, parent.coord.data(),
+                                                      parent.zcorn.data(), nullptr, req);
+
+    // The refined count comes from the tables, not from a factor.
+    BOOST_CHECK(refined.dims == (std::array<int,3>{4, 1, 2}));
+
+    const std::array<double,5> expectedX = {1.0, 2.0, 2.25, 2.75, 3.0};
+    for (int jr = 0; jr <= refined.dims[1]; ++jr) {
+        for (int ir = 0; ir <= refined.dims[0]; ++ir) {
+            const double* p = &refined.coord[6*(static_cast<std::size_t>(jr)*(refined.dims[0] + 1) + ir)];
+            BOOST_CHECK_CLOSE(p[0], expectedX[ir], 1e-11);
+        }
+    }
+
+    // Volume is conserved whatever the columns do: the box is 2x1x2 unit cells.
+    Dune::CpGrid refinedGrid;
+    const auto raw = grdecl{ {refined.dims[0], refined.dims[1], refined.dims[2]},
+                             refined.coord.data(), refined.zcorn.data(), refined.actnum.data() };
+    refinedGrid.processEclipseFormat(raw, false);
+    BOOST_CHECK_EQUAL(refinedGrid.size(0), 8);
+    BOOST_CHECK_CLOSE(totalVolume(refinedGrid), 4.0, 1e-9);
+
+    // A parent that keeps only one column is left exactly as it was.
+    BOOST_CHECK_CLOSE(refined.coord[0], 1.0, 1e-11);
+}
+
+// Spelling a uniform box as explicit tables must change nothing: this is the
+// path every existing deck now takes through axisSubdivision().
+BOOST_AUTO_TEST_CASE(explicitUniformTablesMatchTheFactorPath)
+{
+    auto parent = makeVerticalPillarGrid({4, 3, 3}, [](int i_, int j_, int k_) {
+        return static_cast<double>(cellOf(k_) + sideOf(k_))
+             + 0.1*cellOf(i_) - 0.05*cellOf(j_);      // non-trivial geometry
+    });
+
+    Opm::Refinement::BlockRefinement uniform;
+    uniform.name = "LGR1";
+    uniform.cellsPerDim = {2, 3, 2};
+    uniform.startIJK = {1, 1, 1};
+    uniform.endIJK = {3, 2, 3};
+
+    auto graded = uniform;
+    graded.subdivision[0] = Opm::Refinement::AxisSubdivision{
+        {0, 0, 1, 1}, {0.0, 0.5, 0.0, 0.5}, {0.5, 1.0, 0.5, 1.0} };
+    graded.subdivision[1] = Opm::Refinement::AxisSubdivision{
+        {0, 0, 0}, {0.0, 1.0/3.0, 2.0/3.0}, {1.0/3.0, 2.0/3.0, 1.0} };
+    graded.subdivision[2] = Opm::Refinement::AxisSubdivision{
+        {0, 0, 1, 1}, {0.0, 0.5, 0.0, 0.5}, {0.5, 1.0, 0.5, 1.0} };
+
+    const auto a = Opm::Refinement::refineBlock(parent.dims, parent.coord.data(),
+                                                parent.zcorn.data(), nullptr, uniform);
+    const auto b = Opm::Refinement::refineBlock(parent.dims, parent.coord.data(),
+                                                parent.zcorn.data(), nullptr, graded);
+
+    BOOST_CHECK(a.dims == b.dims);
+    BOOST_REQUIRE_EQUAL(a.coord.size(), b.coord.size());
+    BOOST_REQUIRE_EQUAL(a.zcorn.size(), b.zcorn.size());
+    for (std::size_t i = 0; i < a.coord.size(); ++i) {
+        BOOST_CHECK_CLOSE(a.coord[i], b.coord[i], 1e-11);
+    }
+    for (std::size_t i = 0; i < a.zcorn.size(); ++i) {
+        BOOST_CHECK_CLOSE(a.zcorn[i], b.zcorn[i], 1e-11);
+    }
+}
