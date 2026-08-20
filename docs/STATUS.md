@@ -93,7 +93,8 @@ branch (separate, not pushed in this round).
 | Non-black-oil (solvent/polymer/biofilm/MICP) + LGR | ✗→err | clear error; black-oil is the supported scope |
 | Whole-grid (box==grid) LGR in parallel | ✗→err | needs distributed refinement; rank-interior refuses clearly |
 | Nested boundary-touching child | ✗→err | rejected with containment message |
-| Restart from an LGR run | ✗→err | blanket guard on `maxLevel() > 0`; verified on Norne. Non-LGR restart unaffected. See `LGR_GAPS.md` B8 |
+| **Restart from an LGR run (serial)** | ✓ | per-level solution sections read and the leaf assembled; Norne restarts at step 101, tracking the uninterrupted run to 0.2 % |
+| Restart from an LGR run (parallel) | ✗→err | the reference grid holding the leaf ordering is on the I/O rank only; refused with a message |
 | Redistribution / rebalancing a distributed grid | ✗ | CpGrid-level gap; belongs to dynamic AMR (`REDISTRIBUTION-status.md`) |
 | Dynamic AMR | ◐ | `AdaptiveCpGrid` first cut (refine-after-construction, re-adaptable); no coarsening / cross-adapt data transfer / parallel adapt yet (`DESIGN-parallel-octree.md`) |
 
