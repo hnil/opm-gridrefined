@@ -222,6 +222,25 @@ Norne restart decks no longer need writing by hand: `rst_deck -s CASE.DATA
 BASE:101 OUT` produces one that runs, 233 timesteps / 1211 Newton, identical to
 the hand-written equivalent.
 
+**B9 transmissibility multipliers on refined faces — FIXED 2026-08-20**
+(opm-simulators `1a47c840e`). A refined leaf cell reports its *coarse* cell's
+Cartesian index, so two cells refining one coarse cell share it. `MULT[XYZ]`
+describes a coarse cell's own faces, which the refinement inherits on its outer
+boundary; the code applied them to faces *interior* to the coarse cell as well.
+
+- PINCH's MULTZ option `ALL` walks the pillar by coarse index, which for an
+  interior face has nothing to walk. That case threw `"MULTZ not support with
+  LGRS, yet"`, refusing any refined grid.
+- The ordinary path threw nothing and had been quietly damping interior faces
+  since LGRs arrived.
+
+Interior faces now take no multiplier. `SPE1CASE1_CARFIN1_MULTZ` covers it: the
+refined layer closing the coarse cell that carries `MULTZ 0.05` has exactly
+0.0500 times its no-MULTZ transmissibility, every other refined layer exactly
+1.0000. Changes results where an LGR box meets a multiplier: SPE1CASE1_CARFIN_FAULTS
+49 -> 53 Newton, Norne 1284 -> 1306, with Norne's field vectors moving 0.005 % at
+most (its LGR is 1:1 in k, so it has no interior Z faces).
+
 ## C. Parallel correctness / infrastructure
 
 | # | Gap | Notes |
