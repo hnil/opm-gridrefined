@@ -73,6 +73,7 @@ branch (separate, not pushed in this round).
 | **Parent intersection across a faulted LGR boundary** | ✓ | matched by level-0 ancestor pair, not by face side |
 | **Graded refinement (`N*FIN`/`H*FIN`)** | ✓ | per-parent column counts and widths; Norne matches the reference's sub-pillar spacing. Refused for box-to-box interfaces and `geometryInFather()` |
 | **Transmissibility multipliers (`MULT[XYZ]`, `MULTFLT`) on a refined box** | ✓ | a coarse cell's multiplier lands on the refinement's outer faces only; PINCH `ALL` no longer refuses LGRs |
+| **`TRAN[XYZ]` modifiers on a refined box (serial)** | ✓ | `MULTIPLY`/`MINVALUE`/`MAXVALUE` reach the faces closing a coarse cell; `EQUALS`/`ADD` and parallel refused with a message |
 | **Block-local `MINPV`** | ✓ | refined cells take their share of the father's pore volume by volume; Norne's LGR ACTNUM matches the reference cell for cell |
 | Other block-local properties (`PORO`, `PERMX`, …) | ✗ | scoped out of the global grid and warned about; refined cells inherit the father |
 | Edge/face-sharing (touching) boxes | ✓ | `CARFIN`, `CARFIN_FLEX` |
