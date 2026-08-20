@@ -190,9 +190,18 @@ solution section and reassemble it in leaf order, after which the existing
 `setRestart(..., globalIdx)` indexing works unchanged. opm-common has a
 `test_RestartLGR`, so some of the file-format side may already be there.
 
-**Aside, not LGR:** `rst_deck` crashes with `std::out_of_range` on Norne, with or
-without the LGR, and on the untouched `builds/release` binary too. Restart decks
-for Norne have to be written by hand.
+**Aside, not LGR — FIXED 2026-08-20** (opm-common `5c5ce317b`, `b4b8e62d0`).
+`rst_deck` aborted with `std::out_of_range` on Norne, with or without the LGR:
+`FileDeck::rst_solution` cleared the SOLUTION section by walking towards SUMMARY
+while decrementing SUMMARY's index per erase, which only holds if the section
+sits in one file — Norne's SOLUTION includes its equilibration data. It now
+collects the positions and erases back to front. Separately, an option given
+after the positional arguments (as its own usage example shows) was silently
+dropped on macOS, where getopt does not permute argv.
+
+Norne restart decks no longer need writing by hand: `rst_deck -s CASE.DATA
+BASE:101 OUT` produces one that runs, 233 timesteps / 1211 Newton, identical to
+the hand-written equivalent.
 
 ## C. Parallel correctness / infrastructure
 
