@@ -119,6 +119,18 @@ template <typename Container>
 Container reorderForOutput(const Container& simulatorContainer,
                            const std::vector<int>& toOutput);
 
+/// @brief Undo reorderForOutput(): read output-ordered data back into
+///        simulator (compressed) order.
+///
+/// @param [in] outputContainer  Data in strict Cartesian order, as it appears
+///                              in the output file.
+/// @param [in] toOutput         The same permutation reorderForOutput() was
+///                              given: toOutput[position] is the element index
+///                              belonging at that output position.
+template <typename Container>
+Container reorderFromOutput(const Container& outputContainer,
+                            const std::vector<int>& toOutput);
+
 /// @brief Map level Cartesian index to level compressed index (active cell)
 ///
 /// @param [in] grid
@@ -182,6 +194,21 @@ void populateDataVectorLevelGrids(const Dune::CpGrid& grid,
 ///                (from level 0 to grid.maxLevel()), where each entry contains data reordered
 ///                according to increasing level Cartesian indices for output.
 #if HAVE_OPM_COMMON
+/// @brief Assemble a leaf-ordered solution from one solution per level grid.
+///
+/// The inverse of extractSolutionLevelGrids(): a leaf cell takes the value its
+/// own level holds for it. Parent cells carry an average of their children in
+/// the file, which nothing reads back -- a cell with children is not in the leaf.
+///
+/// @param [in]  grid
+/// @param [in]  levelSolutions  One per level, level zero first, each in the
+///                              output ordering the file uses.
+/// @param [out] leafSolution    Keys present on every level are assembled;
+///                              others are skipped.
+void assembleSolutionFromLevelGrids(const Dune::CpGrid& grid,
+                                    const std::vector<Opm::data::Solution>& levelSolutions,
+                                    Opm::data::Solution& leafSolution);
+
 void extractSolutionLevelGrids(const Dune::CpGrid& grid,
                                const std::vector<std::vector<int>>& toOutput_refinedLevels,
                                const Opm::data::Solution& leafSolution,
@@ -218,6 +245,18 @@ Container Opm::Lgr::reorderForOutput(const Container& simulatorContainer,
         outputContainer[i] = simulatorContainer[toOutput[i]];
     }
     return outputContainer;
+}
+
+template <typename Container>
+Container Opm::Lgr::reorderFromOutput(const Container& outputContainer,
+                                      const std::vector<int>& toOutput)
+{
+    Container simulatorContainer;
+    simulatorContainer.resize(toOutput.size());
+    for (std::size_t i = 0; i < toOutput.size(); ++i) {
+        simulatorContainer[toOutput[i]] = outputContainer[i];
+    }
+    return simulatorContainer;
 }
 
 template <typename ScalarType>
