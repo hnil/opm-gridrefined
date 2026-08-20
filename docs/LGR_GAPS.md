@@ -241,6 +241,27 @@ refined layer closing the coarse cell that carries `MULTZ 0.05` has exactly
 49 -> 53 Newton, Norne 1284 -> 1306, with Norne's field vectors moving 0.005 % at
 most (its LGR is 1:1 in k, so it has no interior Z faces).
 
+**B10 TRANX/TRANY/TRANZ modifiers on a refined box — FIXED (serial) 2026-08-20**
+(opm-common `bbd813330`, opm-simulators `a375ecf48`). Same shape as B9: a TRAN*
+modifier is written per cell of the deck's grid, while the simulator holds one
+transmissibility per face, so a refined cell has more faces than the deck has
+entries. Applying the two in lockstep reads the wrong modifier for every face
+past the first refined cell, and refinement was refused outright.
+
+The modifier now reaches the refined faces that close its coarse cell, through a
+map built from the same `LookUpData` this class reads porosity and NTG through;
+faces interior to a coarse cell take none. Only `MULTIPLY`, `MINVALUE` and
+`MAXVALUE` carry over -- an assigned or added transmissibility is absolute and
+does not divide over the faces a refinement puts in a coarse face's place, so it
+is refused with a message rather than multiplied by their number.
+
+`SPE1CASE1_CARFIN1_TRANZ` covers it: halving TRANZ on the coarse layer the LGR
+spans halves exactly the refined layer closing that coarse cell (0.5000) and
+leaves every other refined layer at 1.0000.
+
+**Parallel is refused**: the map uses a rank's own field-prop indices, which do
+not line up with the global arrays the modifiers come from.
+
 ## C. Parallel correctness / infrastructure
 
 | # | Gap | Notes |
