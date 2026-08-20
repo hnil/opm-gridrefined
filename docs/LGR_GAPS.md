@@ -176,7 +176,26 @@ the I/O reference grid skipped MINPV/PINCH because it was processed without an
 EclipseState. Norne's graded CARFIN now runs at np=2 with an EGRID identical to
 serial's. See `STATUS.md`.
 
-**B8 restart with an LGR — refused, verified 2026-08-19.** A restart deck built
+**B8 restart with an LGR — IMPLEMENTED (serial) 2026-08-20** (opm-common
+`420ae50f6`, opm-gridrefined `c98d7851`, opm-simulators `de4e2fed3`). A restart
+step holds one solution section per level, which ERst already addresses by
+occurrence; only the first was ever read. Now every section is read and the leaf
+assembled from them (`assembleSolutionFromLevelGrids`, the inverse of the split
+the writer applies). Norne restarts from report step 101: 257 timesteps, 1478
+Newton, tracking the uninterrupted run to 0.2 % on field rates and 0.002 % on
+field pressure, the refined level agreeing cell by cell as closely as the global
+grid.
+
+**Parallel restart of a refined run is refused**, with a message saying so. The
+reference grid holding the leaf ordering lives only on the I/O rank; broadcasting
+the assembled solution from there is not solved yet.
+
+Found on the way: the deck writer dropped a data keyword's trailing defaults, so
+`rst_deck` shortened Norne's `HXFIN` from 33 widths to 22 (opm-common
+`e9e007ba0`). The CARFIN validation caught it rather than the deck being silently
+refined into a different geometry.
+
+*Superseded description of the original gap:* A restart deck built
 from Norne's graded CARFIN run stops with "Refined grids are not yet supported
 for restart" (`FlowProblemBlackoil::readEclRestartSolution_`, a blanket guard on
 `grid().maxLevel() > 0`). A clean refusal, not a wrong answer. Restart *without*
