@@ -1,7 +1,8 @@
 # LGR (corner-point local grid refinement) — known gaps & test decks
 
 Status of the `opm-gridrefined` LGR rebuild plus its `opm-simulators` /
-`opm-common` output integration, as of 2026-06-16. "Works" = exercised and
+`opm-common` output integration, as of **2026-08-20** (section D is the
+most recent pass; a deck index is at the end of it). "Works" = exercised and
 verified this far; "gap" = throws, is skipped, or produces wrong output.
 
 What already works (for reference):
@@ -113,7 +114,7 @@ New decks live in `opm-tests/lgr/`, all derived from `SPE1CASE1_CARFIN1.DATA`.
 | B3 | **Restarting (reading) a refined-grid restart is rejected.** | `opm-simulators/.../FlowProblemBlackoil.hpp:1295` (`readEclRestartSolution_`) | **`SPE1CASE1_CARFIN1_RESTART.DATA`** (run `SPE1CASE1_CARFIN1` first, then this — needs `UNIFIN`) | throws *"Refined grids are not yet supported for restart"*. |
 | ~~B0~~ | **MPI_RANK in parallel LGR INIT — FIXED (2026-06-16).** Two parts: (a) *sizing* — `MPI_RANK` was written at the full refined-leaf size in the *main-grid* INIT slot (e.g. 924 where the main grid has 300); fixed in `EclGenericWriter_impl.hpp` writeInit (commit a2176e09d) by reducing the leaf `globalRanks_` to level-0 via `getOrigin()`. (b) *per-grid* — the simulator integer maps (incl. `MPI_RANK`) were written only for the main grid via `writeIntegerMaps()`, so the array was absent on refined LGR cells (ResInsight showed it only on the coarse region). Fixed in opm-common `WriteInit.cpp` (commit 2c2e859a5): `writeLGRLocalProperties` now mirrors each integer map onto every LGR via `filterArray(value, global_fathers)`, so each refined cell inherits its father's rank (= the box's owning rank). Verified CARFIN1 np=2: INIT `MPI_RANK` present in all 3 grid sections (main 300 with ranks 0/1, each LGR 324 uniformly its box rank); serial unchanged; parallel UNRST matches serial. |
 | B4 | **Parallel LGR trans/NNC in INIT.** The 2026-06-16 fix routes only the *cell-data gather* through the refined output grid; transmissibility/NNC still use the coarse `equilGrid_`. Inter-level `TRANNNC` in the parallel INIT is therefore not yet verified to match serial. | `EclGenericWriter` (equilGrid_ used by `computeTrans_`/`exportNncStructure_`) | reuse any LGR deck; **compare INIT `TRAN*`/`TRANNNC` serial vs np=2** | not yet checked — likely gap. |
-| B5 | **Block summary vectors at refined cells** (e.g. `BPR` inside an LGR, ECLIPSE `LGR`-qualified block syntax) | summary config | none yet | unverified. |
+| B5 | **Block summary vectors at refined cells** — CONFIRMED 2026-08-20, see D3c. A `B*` vector naming a cell inside a box reads **zero for the whole run**; the global block lookup is gated on `element.level() == 0`, so a refined cell never fills the slot. Now reported at setup. | `OutputBlackoilModule.hpp` | `SPE1CASE1_CARFIN_GR.DATA` (refines its whole grid — 11 of its own vectors were silently zero) | warns; use the `LB*` vectors with the LGR name and its local IJK. |
 
 ---
 
@@ -302,45 +303,183 @@ When a gap is fixed, the corresponding deck becomes a positive regression
 (compareECL serial==parallel for B1; `.RFT` present + correct for B2; restart
 continues for B3).
 
-## Output gaps found by array-by-array comparison (2026-08-20)
+## D. Index-space and output audit (2026-08-20)
 
-`scripts/compare_lgr_output.py` walks an EGRID/INIT array by array against a
-reference, and -- with `--lgr-gap`, needing no reference -- reports which arrays
-exist for the global grid but for no LGR grid. The cell-by-cell ACTNUM/HOSTNUM
-checks used to get Norne and Drogon matching say nothing about which arrays are
-present, which is why none of the following was noticed earlier.
+Everything in this section came out of one recurring defect, worth stating plainly
+because it will keep recurring:
 
-**All three are output only.** The EGRID and INIT are written from the leaf grid
-after the fact; nothing in the simulation reads them back. Verified by rerunning
-Norne with and without the NNCHEAD fix: summary, restart and INIT compare
-bit-identical.
+> **An array is built in one index space and read in another.** Field properties
+> and FIP region arrays are sized by the *input grid's* active cells; the solver
+> and the output loops index by *leaf element*. Without refinement the two
+> coincide, so the code looks correct and every non-LGR test passes. With a
+> CARFIN the leaf is longer, and the read runs off the end of the array.
 
-1. **The global NNC list is truncated when an LGR is present.** OPM drops every
-   NNC whose cells lie inside a refinement box, because `exportNncStructure_`
-   walks the leaf and those coarse cells are not on it. ECLIPSE keeps the coarse
-   grid's connectivity complete -- the global section of the EGRID still contains
-   those cells in COORD/ZCORN/ACTNUM, so its NNC list should describe them.
-   Norne: reference 11287 global NNCs of which 549 have both ends in the box and
-   148 one end; OPM writes 10589 and none of either. Drogon: 6247 vs 1170.
-   Fixing it means computing the coarse grid's connectivity separately at output
-   time, which no current code path produces.
+The second family is structural rather than an index slip: **a feature attached to
+a coarse cell that no longer exists on the leaf** — an NNC, an aquifer connection,
+a block summary vector. There the data is not misread, it is silently dropped.
 
-2. **The INIT's LGR section has no saturation-endpoint arrays.** 17 arrays --
-   `SGCR SGL SGU SOGCR SOWCR SWCR SWL SWU SWATINIT` and their `I*` index
-   variants -- are written for the global grid and for no LGR. Already flagged in
-   `WriteInit.cpp` ("Not yet supported: LGR-specific aquifer and satfunc
-   scaling"). The reference writes all 67 of its per-cell arrays for both grids;
-   OPM writes 42 global and 25 LGR. A refined cell inherits its father's
-   endpoints, so this is the same father lookup `writeLGRLocalProperties`
-   already does for SATNUM, plus a second LGR pass after the global satfunc
-   block.
+Neither family announces itself. The observed symptoms were "solver failed to
+converge", "region indices must be non-negative", `unordered_map::at: key not
+found`, and — worst — a plausible-looking answer with an aquifer contributing
+nothing.
 
-3. **`NNCHEAD` announced the wrong count** for the LGR-to-global section -- FIXED
-   (opm-common). It was handed the LGR's *internal* NNC count; an LGR with no
-   internal NNCs announced zero while writing hundreds of boundary connections.
-   libecl reads the arrays by their own length and takes only the LGR number from
-   the header, so ResInsight was unaffected.
+**Method.** Two things found all of it, and both are cheap to repeat:
 
-Not LGR-specific, seen while comparing: OPM never writes `GDORIENT`, and never
-writes 25 of the INIT arrays ECLIPSE does (`KRG`, `TOPS`, `MINPVV`, ...) for any
-grid, refined or not.
+1. `grep` the simulator for `fieldProps().get_*` and check, at each site, whether
+   the result is indexed by leaf element. `LookUpData::assignFieldProps*OnLeaf` is
+   the fix and is the identity without LGRs (`getFieldPropIdx(i) == i`), so it can
+   be applied without perturbing non-LGR runs.
+2. Build a small deck on `SPE1CASE1_CARFIN1.DATA` exercising one feature, and run
+   it **twice** — with the CARFIN and with it stripped. Any difference in a
+   quantity the refinement should barely move is a finding. Running is not the
+   test; comparing the numbers is.
+
+For the output files, `scripts/compare_lgr_output.py` walks an EGRID/INIT array by
+array against a reference. Its `--lgr-gap` mode — which arrays exist for the
+global grid but for no LGR grid — needs no reference at all and is what found D4b.
+The cell-by-cell ACTNUM/HOSTNUM checks that got Norne and Drogon matching say
+nothing about which arrays are *present*, which is why these went unnoticed.
+
+### D1 — fixed: arrays now mapped onto the leaf
+
+| # | Gap | Where | Test deck | Fix |
+|---|-----|-------|-----------|-----|
+| D1a | **Deck NNC and numerical-aquifer transmissibility looked up in the wrong space.** The input-NNC branch resolved its two Cartesian cells through the *level-zero compressed* map, then indexed `globalTrans()`, which is built on the **leaf**. Any deck NNC in a refined model threw `unordered_map::at: key not found` before the first timestep. Numerical aquifers hit it every time — their connections are routed through this branch unconditionally, even when both cells lie far outside the box. | `EclGenericWriter_impl.hpp` `exportNncStructure_` | `SPE1CASE1_CARFIN1_AQUNUM.DATA` | opm-simulators `17deafe26` |
+| D1b | **Inter-region flow region arrays.** `InterRegFlowMap` is built from the input-grid FIP arrays and sized by them, but `processFluxes` accumulates per leaf element. Refined runs read past the end and used the garbage as a region id: *"Region indices must be non-negative. Got (r1,r2) = (99, -478425464)"*. Only decks asking for `ROFT`/`RGFT`-style vectors build these arrays, which is why no existing LGR deck caught it. | `GenericOutputBlackoilModule` / `OutputBlackoilModule::createLeafInterRegionFlows_` | `SPE1CASE1_CARFIN1_ROFT.DATA` | opm-simulators `1124dcee0` |
+| D1c | **Explicit initialisation.** `PRESSURE`, `SWAT`, `SGAS`, `RS`, `RSW`, `RV`, `RVW`, `TEMPI`, `SALT`, `SALTP` were read straight from field properties and indexed by leaf cell over `numGridDof()`. Every refined cell was initialised from whatever followed the array in memory; the run then failed to converge on step one, which reads as a solver problem rather than an initialisation one. Same read on the CO2STORE/H2STORE restart path. | `FlowProblemBlackoil.hpp` `readExplicitInitialCondition_` | `SPE1CASE1_CARFIN1_EXPLICIT.DATA` | opm-simulators `6003b5c1b` |
+| D1d | **GPMAINT pressure maintenance.** The regional-pressure calculator builds its `RegionMapping` from an input-grid FIP array, then indexes it by simulation cell (`RegionAverageCalculator.hpp:127`). On SPE1CASE1 the deck **aborts** (SIGABRT); whether it aborts or quietly returns a garbage region id is down to what follows the array in memory. `setRegionAveragePressureCalculator` now takes a callable supplying the leaf-mapped array instead of the `FieldPropsManager`. | `GroupStateHelper.hpp`, `BlackoilWellModel_impl.hpp` | `SPE1CASE1_CARFIN1_GPMAINT.DATA` | opm-simulators `1775bc53b` |
+
+Earlier members of the same family, for context: EQLNUM/PVTNUM/SWATINIT in
+equilibration (`a7bb9cb3e`), the FIP region arrays behind FPR (`ae1809ba1`), and
+the datum-region arrays (`37c209c6d`).
+
+### D2 — fixed: output files
+
+| # | Gap | Where | Fix |
+|---|-----|-------|-----|
+| D2a | **`LOGIHEAD` and `DOUBHEAD` were skipped for `NORST != 0`** on the grounds that a graphics-only restart does not need them. It does: `DOUBHEAD` carries the simulated time and `LOGIHEAD` the dual-porosity flag, so libecl builds its restart header from **uninitialised memory** (it null-checks and leaves `sim_days`/`dualp` unset) and ResInsight shows a case with no dynamic data at all; OPM's own `LoadRestart` refuses the file outright. ECLIPSE writes both for a graphics-only restart — checked against a `NORST=1` reference. **Not LGR-specific**: any deck with `NORST=1` was affected. | opm-common `RestartIO.cpp` | `3228891c9` |
+| D2b | **`NNCHEAD` announced the wrong count** for the LGR-to-global NNC section: it was handed the LGR's *internal* count. On a two-box Norne case LGR2 announced 374 while writing 744, and LGR1 — whose interior has no NNC at all — announced **zero** while writing 684 boundary connections. libecl reads the arrays by their own length and takes only the LGR number from the header, so ResInsight was unaffected; a reader trusting the count sees a fraction of the connections or none. | opm-common `EclipseGrid.cpp` `save_nnc_local_global` | `9cc2e3dbf` |
+
+### D3 — made visible, not fixed
+
+These are cases where refinement silently swallows something. Each now reports
+itself; none is repaired.
+
+| # | Gap | Test deck | Message |
+|---|-----|-----------|---------|
+| D3a | **An NNC, EDITNNC or numerical-aquifer connection naming a cell inside a box is dropped from the simulation.** `applyNncToGridTrans_` only *adds* to a face the grid already holds; the coarse cell is not on the leaf, so neither is its NNC face, and `trans_.find()` simply misses. A numerical aquifer in that position stops feeding the reservoir: `ANQR`/`ANQT` read zero for the whole run where the same deck without the CARFIN reaches ~9 sm3. | `SPE1CASE1_CARFIN1_AQUNUM_IN_LGR.DATA` | *"N explicit connection(s) … name a cell pair the grid does not join"*, with the cell pairs listed (opm-simulators `a3102b2ec`) |
+| D3b | **An analytical aquifer (`AQUFETP`/`AQUANCON`) connecting into a box loses every connection.** `AquiferAnalytical::initializeConnections` resolves each `AQUANCON` cell through `compressedIndex()` on its Cartesian index and skips what it cannot find. `AAQT` goes from **-2.15e6 to exactly zero** and pressure holds up 200 psi too well. A **separate path** from D3a — the NNC warning does not cover it. | `SPE1CASE1_CARFIN1_AQUFETP.DATA` | *"Analytical aquifer N: M of M AQUANCON connection(s) name a cell that is not in the simulation grid"* (opm-simulators `1eab62f19`) |
+| D3c | **`B*` summary vectors on a refined cell read zero for the whole run** (see B5). | `SPE1CASE1_CARFIN_GR.DATA` | *"N block summary vector(s) name a cell inside a refined (CARFIN) box"*, listing them (opm-simulators `1eab62f19`) |
+
+### D4 — open gaps
+
+| # | Gap | Evidence | Repair |
+|---|-----|----------|--------|
+| D4a | **The global NNC list is truncated wherever an LGR covers it.** OPM drops every NNC whose cells lie inside a box, because `exportNncStructure_` walks the leaf and those coarse cells are not on it. ECLIPSE keeps the coarse grid's connectivity complete — reasonably, since the global section of the EGRID still contains those cells in COORD/ZCORN/ACTNUM. | Norne: reference 11287 global NNCs, of which **549 have both ends in the box and 148 one end**; OPM writes 10589 and none of either. Drogon: 6247 vs 1170. | Needs the coarse grid's connectivity computed at output time; no current code path produces it. **Output only.** |
+| D4b | **The INIT's LGR section has no saturation-endpoint arrays.** 17 of them — `SGCR SGL SGU SOGCR SOWCR SWCR SWL SWU SWATINIT` and their `I*` index variants — are written for the global grid and for no LGR. Already flagged in the source: *"Not yet supported: LGR-specific aquifer and satfunc scaling"*. | `compare_lgr_output.py --lgr-gap`: OPM writes 42 per-cell arrays for the global grid and 25 for the LGR; the reference writes 67 for both, its own global-vs-LGR gap being empty. | The tractable one. A refined cell inherits its father's endpoints, so it is the same father lookup `writeLGRLocalProperties` already does for SATNUM, plus a second LGR pass after the global satfunc block. A reference now exists to verify against. **Output only.** |
+| D4c | **The refined boundary resolves sliver fault juxtapositions less well than the coarse grid.** OPM's LGR NNC lists are a strict *subset* of the reference's — 7 missing, 0 spurious — and all 7 are marginal overlaps across large fault throws. | Two are the minimum entry of their array (~2e-6 against a median of 0.48); the largest is 1.6e-3 against a median of 1.11. Five of them sit in **one** refined row; the rows either side of it match the reference connection for connection. **Control:** OPM's *unrefined* Norne differs from the reference's coarse connectivity by **1 of 11287 (0.009 %)**, against 7 of 3303 (0.2 %) refined — same class of difference, ~25× the rate. | Tried and reverted: aligning `FaultedBoundaryFaces`'s hardcoded `process_grdecl` tolerance (1e-6) with the main path's `tolerance_unique_points` (0) changes nothing. The faces are absent from the leaf itself, so the cause is in the refined boundary/leaf assembly. Not repaired. |
+| D4d | **A plain `COMPDAT` naming a cell inside a box aborts the run** — *"Cells with these i,j,k indices were not found in grid"*. Wells completed in a refined region must use `WELSPECL`/`COMPDATL` with LGR-local indices (or a trajectory). This is correct behaviour rather than a defect, but it is the first thing a field deck hits when a box is placed over a well. | `NORNE_LGR_WELLS.DATA` demonstrates the conversion. | Check for it before choosing a box: scan every well's completions against the candidate box (see the showcase note below). |
+
+### D5 — keyword handling
+
+`CARFIN`, `LGR`, `NXFIN`/`NYFIN`/`NZFIN`, `HXFIN`/`HYFIN`/`HZFIN`, `WELSPECL` and
+`COMPDATL` were all honoured but still on flow's unsupported-keyword list as
+*critical*, so every LGR deck needed `--parsing-strictness=low` — which also
+silences whatever else the deck gets wrong. Dropped (opm-simulators `676cb7158`,
+`5db773b44`). `LGRCOPY` and `LGRLOCK` remain listed as **non-critical** with a note
+on what flow does instead; `AMALGAM`, `LGRFREE` and `RADFIN*` stay **critical**
+because they change the grid and are not implemented.
+
+**The recipes below still pass `--parsing-strictness=low`; it is no longer needed
+for the LGR keywords themselves.**
+
+### D6 — checked and clean
+
+Analytical aquifer *outside* a box (2 % difference = the refinement's real
+effect), `BCCON`/`BCPROP`, `MULTZ`, `TRAN*` modifiers, numerical aquifer outside a
+box, inter-region flows after D1b, and the LGR-internal fault connections
+(verified cell by cell and by transmissibility — see the showcase note). Solvent,
+polymer, biofilm and MICP throw a clear refusal with LGR rather than running.
+
+Restart files carry no NNC arrays at all, so the D2b/D4a class cannot affect them.
+
+### Full-field showcase
+
+`opm-tests/norne/NORNE_LGR_WELLS.DATA` — base `NORNE_ATW2013` with a 3×3×22 box
+around the injector **F-1H** and another around the producer **E-3H**, each
+refined **3×3×1** (lateral only, so the layering is the base case's). Both wells
+are rewritten to `WELSPECL`/`COMPDATL` by
+`opm-tests/norne/INCLUDE_LGRWELLS/make_lgr_wells.py`, **carrying the deck's own
+connection factors over unchanged** so each well keeps the well index it was
+history-matched with.
+
+Against the unrefined base: same 353 timesteps, 1296 → 1308 Newton, global active
+cells still exactly 44431. FGPT 0.06 %, FOPT 0.19 %, FPR 0.03 %; an untouched well
+(B-1H) moves 0.09 %. The two refined wells move — F-1H's BHP by 1.5 % at identical
+injected volume, E-3H's cumulative oil by 3.6 % — which is the refinement doing
+its job. Each box comes out at 1539 and 1683 active cells, both exact multiples of
+nine, so every child of an active parent survives and the refinement is a pure
+subdivision; that needs block `MINPV 0.1`, because a refined cell holds a ninth of
+its parent's pore volume and the field's `MINPV 500` would delete exactly the
+cells the refinement creates.
+
+Two things to do before choosing a box, both learned the hard way:
+
+- **Scan every well's completions against the candidate box.** Only the wells you
+  intend to convert may have a connection inside it (D4d). LGR2 above is offset
+  one cell in j from centred on E-3H so that it does not clip E-3AH's cell.
+- **Lower `MINPV` inside the box** by at least the refinement factor's product.
+
+Verified connection-wise on that case: a faulted juxtaposition (12,74,1)→(13,74,2)
+and (13,74,3) becomes **6** refined NNCs (3 j-subcolumns × 2), with ΣT = 0.4256
+against the coarse 0.1457 — a ratio of **2.92 ≈ 3**, which is the correct
+signature of lateral refinement (a sub-face has ⅓ the area *and* ⅓ the
+centre-to-centre distance, so each carries about the whole coarse T and there are
+three). Global bookkeeping closes exactly: 129 base NNCs had both ends inside the
+box, all 129 are absent from the refined run's global list, and 374 refined ones
+replace them.
+
+### Test deck index
+
+All in `opm-tests/lgr/` unless noted; all derived from `SPE1CASE1_CARFIN1.DATA`
+so they run in seconds. Each is meant to be run **twice** — as written, and with
+the `CARFIN … ENDFIN` block stripped — and the numbers compared.
+
+| Deck | Exercises | Status |
+|---|---|---|
+| `SPE1CASE1_CARFIN1_AQUNUM.DATA` | numerical aquifer, cells outside the box | passes (D1a) |
+| `SPE1CASE1_CARFIN1_AQUNUM_IN_LGR.DATA` | numerical aquifer connecting **into** the box | warns; ANQR zero (D3a) |
+| `SPE1CASE1_CARFIN1_AQUFETP.DATA` | analytical aquifer connecting **into** the box | warns; AAQT zero (D3b) |
+| `SPE1CASE1_CARFIN1_ROFT.DATA` | inter-region flow vectors across a box | passes (D1b) |
+| `SPE1CASE1_CARFIN1_EXPLICIT.DATA` | explicit initialisation instead of EQUIL | passes (D1c) |
+| `SPE1CASE1_CARFIN1_GPMAINT.DATA` | GPMAINT pressure maintenance on a FIP region | passes (D1d) |
+| `SPE1CASE1_CARFIN1_MULTZ.DATA` | `MULTZ` and PINCH's `ALL` option over a box | passes |
+| `SPE1CASE1_CARFIN1_TRANZ.DATA` | a `TRANZ` modifier over a box | passes |
+| `SPE1CASE1_CARFIN_GR.DATA` | whole grid refined; wells via `WELSPECL`/`COMPDATL` | passes; 11 `B*` vectors read zero (D3c) |
+| `SPE1CASE1_CARFIN_FAULTS.DATA` | fault crossing a box boundary | passes (needs `--parsing-strictness=low` for `AMALGAM`) |
+| `SPE1CASE1_CARFIN1_NESTED.DATA` | nested box touching its parent's boundary | expected refusal |
+| `SPE1CASE1_CARFIN1_NESTED_CONTAINED.DATA` | nested box strictly inside its parent | passes |
+| `norne/NORNE_LGR_WELLS.DATA` | full field, one box per well, `COMPDATL` | passes; the showcase |
+| `lgrtests/NORNE_LGR.DATA` | full field, graded box + block `MINPV` | passes; ships an ECLIPSE reference |
+| `drogon/DROGON_HIST_LGR1.DATA` | full field, uniform box, MSW-era deck, `NORST=1` | passes; ships an ECLIPSE reference that **aborts** at 224 d |
+
+```sh
+# the two-run comparison, for any of the decks above
+F=builds/refined/opm-simulators/bin/flow_blackoil
+S=builds/refined/opm-common/bin/summary
+D=opm-tests/lgr/SPE1CASE1_CARFIN1_AQUFETP.DATA
+python3 - "$D" <<'EOF'
+import re,sys
+s=open(sys.argv[1]).read()
+open('/tmp/nolgr.DATA','w').write(re.sub(r"(?m)^CARFIN\n(?:.*\n)*?^ENDFIN\n","",s))
+EOF
+$F "$D"            --output-dir=/tmp/lgr
+$F /tmp/nolgr.DATA --output-dir=/tmp/nolgr
+$S /tmp/lgr/*.SMSPEC   AAQT:1 FPR
+$S /tmp/nolgr/*.SMSPEC AAQT:1 FPR      # differences here are the finding
+
+# array-by-array against a reference, or against nothing at all
+export CONVERTECL=builds/refined/opm-common/bin/convertECL
+python3 opm-gridrefined/scripts/compare_lgr_output.py REF.EGRID RUN.EGRID
+python3 opm-gridrefined/scripts/compare_lgr_output.py --lgr-gap RUN.INIT
+```
