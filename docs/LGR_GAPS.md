@@ -301,3 +301,46 @@ $FLOW SPE1CASE1_CARFIN1.DATA --parsing-strictness=low --output-dir=/tmp/rb
 When a gap is fixed, the corresponding deck becomes a positive regression
 (compareECL serial==parallel for B1; `.RFT` present + correct for B2; restart
 continues for B3).
+
+## Output gaps found by array-by-array comparison (2026-08-20)
+
+`scripts/compare_lgr_output.py` walks an EGRID/INIT array by array against a
+reference, and -- with `--lgr-gap`, needing no reference -- reports which arrays
+exist for the global grid but for no LGR grid. The cell-by-cell ACTNUM/HOSTNUM
+checks used to get Norne and Drogon matching say nothing about which arrays are
+present, which is why none of the following was noticed earlier.
+
+**All three are output only.** The EGRID and INIT are written from the leaf grid
+after the fact; nothing in the simulation reads them back. Verified by rerunning
+Norne with and without the NNCHEAD fix: summary, restart and INIT compare
+bit-identical.
+
+1. **The global NNC list is truncated when an LGR is present.** OPM drops every
+   NNC whose cells lie inside a refinement box, because `exportNncStructure_`
+   walks the leaf and those coarse cells are not on it. ECLIPSE keeps the coarse
+   grid's connectivity complete -- the global section of the EGRID still contains
+   those cells in COORD/ZCORN/ACTNUM, so its NNC list should describe them.
+   Norne: reference 11287 global NNCs of which 549 have both ends in the box and
+   148 one end; OPM writes 10589 and none of either. Drogon: 6247 vs 1170.
+   Fixing it means computing the coarse grid's connectivity separately at output
+   time, which no current code path produces.
+
+2. **The INIT's LGR section has no saturation-endpoint arrays.** 17 arrays --
+   `SGCR SGL SGU SOGCR SOWCR SWCR SWL SWU SWATINIT` and their `I*` index
+   variants -- are written for the global grid and for no LGR. Already flagged in
+   `WriteInit.cpp` ("Not yet supported: LGR-specific aquifer and satfunc
+   scaling"). The reference writes all 67 of its per-cell arrays for both grids;
+   OPM writes 42 global and 25 LGR. A refined cell inherits its father's
+   endpoints, so this is the same father lookup `writeLGRLocalProperties`
+   already does for SATNUM, plus a second LGR pass after the global satfunc
+   block.
+
+3. **`NNCHEAD` announced the wrong count** for the LGR-to-global section -- FIXED
+   (opm-common). It was handed the LGR's *internal* NNC count; an LGR with no
+   internal NNCs announced zero while writing hundreds of boundary connections.
+   libecl reads the arrays by their own length and takes only the LGR number from
+   the header, so ResInsight was unaffected.
+
+Not LGR-specific, seen while comparing: OPM never writes `GDORIENT`, and never
+writes 25 of the INIT arrays ECLIPSE does (`KRG`, `TOPS`, `MINPVV`, ...) for any
+grid, refined or not.
