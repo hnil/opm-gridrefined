@@ -28,9 +28,11 @@
 
 #include <dune/common/parallel/mpihelper.hh>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -1186,4 +1188,181 @@ BOOST_AUTO_TEST_CASE(processGrdeclSplitsFaultedCoarseFineColumnPair)
     BOOST_CHECK((coarseConnectedTo == std::set<int>{1, 2}));
 
     free_processed_grid(&out);
+}
+
+// ---------------------------------------------------------------------------
+// Skew-pillar variants of the face-sharing cases. The corner pool identifies
+// shared box-boundary corners by exact coordinate, relying on both boxes
+// resampling with bitwise-identical results (docs/CORNER-POOL-EXACTNESS.md).
+// Inclined pillars and binary-inexact depth increments make that a real test.
+// A merge miss leaves two vertices an ulp apart (caught by the pair-distance
+// check) and, for equal factors, seals the interface (caught by the connection
+// counts and the assembler's unmatched-owner throw).
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Every pillar inclined with its own tilt, so sub-pillar interpolation and
+// zcorn resampling produce full-precision doubles.
+TestGrdecl makeSkewPillarGrid(const std::array<int,3>& dims,
+                              const std::function<double(int,int,int)>& depth)
+{
+    TestGrdecl g = makeVerticalPillarGrid(dims, depth);
+    const auto& [nx, ny, nz] = dims;
+    static_cast<void>(nz);
+    for (int j = 0; j <= ny; ++j) {
+        for (int i = 0; i <= nx; ++i) {
+            double* p = &g.coord[6*(static_cast<std::size_t>(j)*(nx + 1) + i)];
+            p[3] = i + 0.4 + 0.05*i - 0.03*j;
+            p[4] = j - 0.3 + 0.04*j + 0.02*i;
+        }
+    }
+    return g;
+}
+
+// Layers tilted in i and j with binary-inexact increments; node-based, so
+// faces conform bitwise across cells.
+double tiltedDepth(int i_, int j_, int k_)
+{
+    return 2.0*((k_ + 1)/2) + 0.1*((i_ + 1)/2) + 0.07*((j_ + 1)/2);
+}
+
+// Smallest distance between distinct leaf vertices. Complements the exact
+// duplicate-coordinate check: a corner-pool merge miss produces two vertices
+// an ulp apart, which no exact-set check can see.
+double minVertexPairDistance(const Dune::CpGrid& grid)
+{
+    std::vector<Dune::FieldVector<double,3>> pts;
+    for (const auto& vertex : Dune::vertices(grid.leafGridView())) {
+        pts.push_back(vertex.geometry().center());
+    }
+    double minDist = std::numeric_limits<double>::max();
+    for (std::size_t a = 0; a < pts.size(); ++a) {
+        for (std::size_t b = a + 1; b < pts.size(); ++b) {
+            auto d = pts[a];
+            d -= pts[b];
+            minDist = std::min(minDist, d.two_norm());
+        }
+    }
+    return minDist;
+}
+
+// Refined-to-refined leaf connections whose parents lie on opposite sides of
+// splitAt along axis (i.e. across the box-box interface), counted twice.
+int crossBoxConnections(const Dune::CpGrid& grid, int axis, int splitAt)
+{
+    const auto& dims = grid.logicalCartesianSize();
+    const auto parentAlong = [&](int leafCell) {
+        const int cart = grid.globalCell()[leafCell];
+        const std::array<int,3> ijk = { cart % dims[0],
+                                        (cart / dims[0]) % dims[1],
+                                        cart / (dims[0]*dims[1]) };
+        return ijk[axis];
+    };
+    int count = 0;
+    for (const auto& element : Dune::elements(grid.leafGridView())) {
+        for (const auto& is : Dune::intersections(grid.leafGridView(), element)) {
+            if (!is.neighbor() || !is.inside().hasFather() || !is.outside().hasFather()) {
+                continue;
+            }
+            const int pin = parentAlong(is.inside().index());
+            const int pout = parentAlong(is.outside().index());
+            if ((pin < splitAt) != (pout < splitAt)) {
+                ++count;
+            }
+        }
+    }
+    return count;
+}
+
+} // anonymous namespace
+
+// Equal in-face factors on inclined pillars: 1:1 face pairing by merged
+// corner set. A merge miss would seal the i=2 interface.
+BOOST_AUTO_TEST_CASE(skewPillarFaceSharingBoxes)
+{
+    auto parent = makeSkewPillarGrid({4, 2, 2}, tiltedDepth);
+    Dune::CpGrid grid;
+    auto rawParent = parent.raw();
+    grid.processEclipseFormat(rawParent, false);
+    const double volumeBefore = totalVolume(grid);
+
+    BuilderGuard guard(std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+        parent.dims, parent.coord, parent.zcorn, parent.actnum));
+
+    grid.addLgrsUpdateLeafView({{2,2,2}, {3,2,2}},
+                               {{0,0,0}, {2,0,0}},
+                               {{2,2,2}, {4,2,2}},
+                               {"A", "B"});
+
+    BOOST_REQUIRE_EQUAL(grid.maxLevel(), 2);
+    BOOST_CHECK_EQUAL(grid.size(0), 8*8 + 8*12);
+    BOOST_CHECK_CLOSE(totalVolume(grid), volumeBefore, 1e-6);
+    BOOST_CHECK_SMALL(maxClosure(grid), 1e-9);
+    checkEveryInteriorFaceTwoSided(grid);
+    // ry*rz = 4 connections per parent pair, 2x2 pairs, counted twice.
+    BOOST_CHECK_EQUAL(crossBoxConnections(grid, 0, 2), 16*2);
+    // Shared corners merged to one vertex; nothing an ulp apart either.
+    BOOST_CHECK_GT(minVertexPairDistance(grid), 1e-3);
+}
+
+// Compatible (one side uniformly finer) in-face factors on inclined pillars:
+// the finer side's even-index fractions (2/4, ...) must reproduce the coarser
+// side's (1/2, ...) bitwise for the shared corners to merge.
+BOOST_AUTO_TEST_CASE(skewPillarCompatibleSubdivisionMosaic)
+{
+    auto parent = makeSkewPillarGrid({4, 2, 2}, tiltedDepth);
+    Dune::CpGrid grid;
+    auto rawParent = parent.raw();
+    grid.processEclipseFormat(rawParent, false);
+    const double volumeBefore = totalVolume(grid);
+
+    BuilderGuard guard(std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+        parent.dims, parent.coord, parent.zcorn, parent.actnum));
+
+    grid.addLgrsUpdateLeafView({{2,4,4}, {2,2,2}},
+                               {{0,0,0}, {2,0,0}},
+                               {{2,2,2}, {4,2,2}},
+                               {"A", "B"});
+
+    BOOST_REQUIRE_EQUAL(grid.maxLevel(), 2);
+    BOOST_CHECK_EQUAL(grid.size(0), 8*32 + 8*8);
+    BOOST_CHECK_CLOSE(totalVolume(grid), volumeBefore, 1e-6);
+    // The coarser interface cell is closed by the finer side's sub-face
+    // triangulations; on inclined pillars the shared face is curved, so the
+    // cell closes only to the face's non-planarity, not to roundoff.
+    BOOST_CHECK_SMALL(maxClosure(grid), 1e-7);
+    checkEveryInteriorFaceTwoSided(grid);
+    // Finer side emits 4x4 sub-faces per parent pair, 2x2 pairs, twice.
+    BOOST_CHECK_EQUAL(crossBoxConnections(grid, 0, 2), 64*2);
+    BOOST_CHECK_GT(minVertexPairDistance(grid), 1e-3);
+}
+
+// Stacked boxes sharing a k-face on inclined pillars: the shared corners
+// collapse in the vertical fraction onto the tilted layer surface.
+BOOST_AUTO_TEST_CASE(skewPillarStackedBoxesShareKFace)
+{
+    auto parent = makeSkewPillarGrid({2, 2, 4}, tiltedDepth);
+    Dune::CpGrid grid;
+    auto rawParent = parent.raw();
+    grid.processEclipseFormat(rawParent, false);
+    const double volumeBefore = totalVolume(grid);
+
+    BuilderGuard guard(std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+        parent.dims, parent.coord, parent.zcorn, parent.actnum));
+
+    grid.addLgrsUpdateLeafView({{2,2,2}, {2,2,3}},
+                               {{0,0,0}, {0,0,2}},
+                               {{2,2,2}, {2,2,4}},
+                               {"LOW", "HIGH"});
+
+    BOOST_REQUIRE_EQUAL(grid.maxLevel(), 2);
+    BOOST_CHECK_EQUAL(grid.size(0), 8*8 + 8*12);
+    BOOST_CHECK_CLOSE(totalVolume(grid), volumeBefore, 1e-6);
+    BOOST_CHECK_SMALL(maxClosure(grid), 1e-9);
+    checkEveryInteriorFaceTwoSided(grid);
+    // rx*ry = 4 connections per parent pair, 2x2 pairs, counted twice.
+    BOOST_CHECK_EQUAL(crossBoxConnections(grid, 2, 2), 16*2);
+    BOOST_CHECK_GT(minVertexPairDistance(grid), 1e-3);
 }
