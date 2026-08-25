@@ -383,18 +383,52 @@ itself; none is repaired.
 | D4f | **A numerical aquifer cell inside a refinement box** — the aquifer borrows a grid cell, and a CARFIN over it replaces that cell with refined ones. Nothing carries the aquifer across: the coarse cell is gone from the leaf, so the aquifer has nothing to occupy and its AQUCON connections have no face. `computeTrans_` already assumed it could not happen (`assert(level == 0)` for an aquifer cell), so a debug build aborted partway through the first output and a release build wrote the wrong thing silently. Now **refused at input**, naming the cell and the box (opm-common `ade577c0c`). Note this is separate from D3a, which is a *connection* into a box; this is the aquifer's own cell. | `/tmp` probe: `SPE1CASE1_CARFIN1_AQUNUM` with AQUNUM moved to (5,5,1), inside LGR1 | Carrying an aquifer onto refined cells is a modelling question (which child holds it?), so refusal is probably the right permanent answer. |
 | D4g | **A well completed in more than one LGR** — a well carries a single LGR tag and the simulator resolves *every* connection against it (`BlackoilWellModelGeneric::initializeWellPerfData`), so a `COMPDATL` record naming a second box is placed in the well's own box at the other box's local indices. Found by stress-testing: two boxes touching along i, one well with 9 connections in each. It **ran and produced**, and the restart showed all 18 connections in `LFT` -- 9 of them at `RGT`'s local indices -- with `RGT`'s section holding no `ICON` at all. When the two boxes differ in size the same misrouting surfaces as `Internal error: Input IJK index (2,2,6) not part of grid with dimensions 6 x 6 x 3`, naming neither the well nor the keyword. Now **refused** (opm-common `cdc6eafb9`). | `SPE1CASE1_CARFIN_TWO_LGR_WELL.DATA` | The real fix is to resolve each connection against its own `Connection::get_lgr_level()` rather than the well's tag. Connections in the *global* grid alongside an LGR are fine and are deliberately still allowed. |
 
-### D5 — keyword handling
+### D5 — keyword handling, and what an unsupported combination should do
 
 `CARFIN`, `LGR`, `NXFIN`/`NYFIN`/`NZFIN`, `HXFIN`/`HYFIN`/`HZFIN`, `WELSPECL` and
-`COMPDATL` were all honoured but still on flow's unsupported-keyword list as
-*critical*, so every LGR deck needed `--parsing-strictness=low` — which also
-silences whatever else the deck gets wrong. Dropped (opm-simulators `676cb7158`,
-`5db773b44`). `LGRCOPY` and `LGRLOCK` remain listed as **non-critical** with a note
-on what flow does instead; `AMALGAM`, `LGRFREE` and `RADFIN*` stay **critical**
-because they change the grid and are not implemented.
+`COMPDATL` are all honoured and were taken off flow's unsupported-keyword list
+(opm-simulators `676cb7158`, `5db773b44`); every LGR deck used to need
+`--parsing-strictness=low`, which also silences whatever else the deck gets wrong.
 
-**The recipes below still pass `--parsing-strictness=low`; it is no longer needed
-for the LGR keywords themselves.**
+**The scope decision (2026-08-20): LGR is a way of specifying refinement and its
+properties, nothing more.** The ECLIPSE apparatus around it -- amalgamating boxes,
+copying, locking, freeing, radial refinement -- is not worth implementing. What
+that costs a user must therefore be *said*, not discovered. Every one of these now
+carries a reason rather than a bare "keyword not supported"
+(opm-simulators `a6ec27313`):
+
+| keyword | what the user is told |
+|---|---|
+| `AMALGAM` | boxes are independent; nothing can span two of them |
+| `COARSEN` | only refinement is implemented |
+| `COMPSEGL`, `COMPDATM` | a multisegment well cannot be completed in a refined block |
+| `LGRFREE` | refinement is static for the whole run |
+| `RADFIN`, `RADFIN4` | only Cartesian refinement, not radial |
+| `REFINE` | refinement is specified with `CARFIN` |
+| `LGRCOPY` | non-critical: refined cells inherit their parent's properties |
+| `LGRLOCK` | non-critical: refinement is static for the whole run |
+
+The same standard applies to combinations the keyword list cannot express. Each of
+these ends in a message naming the well, cell or box rather than an assertion, an
+out-of-range internal error, or silence:
+
+| combination | outcome |
+|---|---|
+| well completed in more than one LGR (D4g) | refused, naming the well and the grids |
+| numerical aquifer cell inside a box (D4f) | refused, naming the cell and the box |
+| `MINPV` emptying a coarse cell's children | refused, naming the first cell |
+| nested box touching its parent's boundary | refused, naming the box and the rule |
+| graded box meeting another box | refused |
+| solvent / polymer / biofilm / MICP | refused |
+| parallel restart of a refined grid | refused |
+| NNC or aquifer connection into a box (D3a, D3b) | warned, with the cell pairs |
+| `B*` vector on a refined cell (D3c) | warned, listing the vectors |
+| block `MINPV` removing pore volume (>1%) | warned, with the percentage |
+
+**The standard for anything added later:** an unsupported combination must refuse
+or warn in terms of the deck -- a well name, a cell, a box -- and must never be
+left to surface as an assertion, an out-of-range index, or a plausible-looking
+number.
 
 ### D6 — checked and clean
 
