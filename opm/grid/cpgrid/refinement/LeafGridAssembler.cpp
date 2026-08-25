@@ -609,6 +609,22 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
             mosaicOutside.push_back(outside);
         }
     }
+
+    // Every face-sharing owner face must have been claimed by its partner box.
+    // An unclaimed one means the shared-face corners did not merge exactly in
+    // the corner pool, and the box<->box interface would silently seal.
+    for (const auto& entry : sharedBoundaryFaceLeaf) {
+        const int leafFace = entry.second;
+        if (mosaicOutside[leafFace] < 0) {
+            const int ownerBox = leafFaces[leafFace].grid - 1;
+            throw std::logic_error("Internal error: refined box '"
+                                   + requests[ownerBox].name
+                                   + "' has an interface face toward a face-sharing "
+                                     "refined box with no matching partner face. "
+                                     "The shared boundary corners failed to merge "
+                                     "exactly; the interface would be sealed.");
+        }
+    }
     const int numSourceFaces = static_cast<int>(leafFaces.size());
 
     // ----- Faulted box boundaries: synthetic split faces -------------------
