@@ -12,9 +12,18 @@ unnoticed.  This walks the whole file instead:
   * the NNC bookkeeping: how many of the reference's NNCs have both ends, or one
     end, inside a refinement box.
 
+  * the values, not just the names -- an array can be present, the right length
+    and still wrong, which is how a refined grid that had lost half its vertical
+    transmissibility passed every check we ran on Drogon and Norne;
+  * a reference-free sibling check: children of one coarse cell should have
+    comparable transmissibilities, so one child at a fraction of a percent of its
+    siblings is a defect, and HOSTNUM tells us who the siblings are.
+
 Usage:  compare_lgr_output.py REFERENCE.EGRID RUN.EGRID [i1 i2 j1 j2 k1 k2 nx ny]
         compare_lgr_output.py REFERENCE.INIT  RUN.INIT
         compare_lgr_output.py --lgr-gap RUN.INIT
+        compare_lgr_output.py --values REFERENCE.INIT RUN.INIT
+        compare_lgr_output.py --siblings RUN.EGRID RUN.INIT
 """
 import os
 import re
@@ -80,8 +89,93 @@ def lgr_gap(run):
         print("   " + " ".join(f"{x:<10}" for x in gap[i:i + 6]))
 
 
+def _numbers(path, index):
+    return [float(x) for x in values(path, index)]
+
+
+def compare_values(ref, run, rtol=1e-3):
+    """Compare the values of every array the two files share, in file order."""
+    a, b = arrays(ref), arrays(run)
+    common = [(i, x) for i, x in enumerate(a)
+              if i < len(b) and (b[i][0], b[i][1]) == (x[0], x[1])]
+    print(f"comparing {len(common)} arrays present in both with the same length")
+    for i, (name, n, typ, _) in common:
+        if typ not in ('REAL', 'DOUB'):
+            continue
+        x, y = _numbers(ref, i), _numbers(run, i)
+        pairs = [(p, q) for p, q in zip(x, y) if abs(p) > 0.0]
+        if not pairs:
+            continue
+        ratios = sorted(q / p for p, q in pairs)
+        off = sum(1 for p, q in pairs if abs(q / p - 1.0) > rtol)
+        if not off:
+            continue
+        mid = ratios[len(ratios) // 2]
+        print(f"  {name:<10}[{n:>7}]  {off:>7} of {len(pairs)} differ by >{rtol:g}"
+              f"   run/reference  p1 {ratios[len(ratios)//100]:.4f}"
+              f"  median {mid:.4f}  p99 {ratios[-len(ratios)//100 - 1]:.4f}")
+
+
+def siblings(egrid, init, floor=0.1):
+    """Children of one coarse cell should have comparable transmissibilities.
+
+    Needs no reference: HOSTNUM says which refined cells share a father, and a
+    child whose TRAN* is a small fraction of its siblings' median is a sliver
+    where a full face should be.
+    """
+    ge = arrays(egrid)
+    hosts = [i for i, (name, *_) in enumerate(ge) if name == 'HOSTNUM']
+    if not hosts:
+        print("no HOSTNUM: not a refined grid")
+        return
+    gi = arrays(init)
+    for lgr, h in enumerate(hosts, start=1):
+        hostnum = [int(v) for v in values(egrid, h)]
+        ncell = len(hostnum)
+        # PORV is written for every cell of the LGR, TRAN* only for the active ones.
+        porv = next((_numbers(init, i) for i, (nm, n, *_) in enumerate(gi)
+                     if nm == 'PORV' and n == ncell), None)
+        if porv is None:
+            print(f"LGR {lgr}: no PORV of length {ncell} in the INIT")
+            continue
+        active = [c for c, v in enumerate(porv) if v > 0.0]
+        for kw in ('TRANX', 'TRANY', 'TRANZ'):
+            tran = next((_numbers(init, i) for i, (nm, n, *_) in enumerate(gi)
+                         if nm == kw and n == len(active)), None)
+            if tran is None:
+                continue
+            family = {}
+            for slot, c in enumerate(active):
+                family.setdefault(hostnum[c], []).append(tran[slot])
+            bad = tot = 0
+            worst = None
+            for vals in family.values():
+                vals = [v for v in vals if v > 0.0]
+                if len(vals) < 2:
+                    continue
+                vals.sort()
+                mid = vals[len(vals) // 2]
+                for v in vals:
+                    tot += 1
+                    if v < floor * mid:
+                        bad += 1
+                        if worst is None or v / mid < worst:
+                            worst = v / mid
+            if bad:
+                print(f"LGR {lgr} {kw}: {bad} of {tot} children below {floor:g} of "
+                      f"their siblings' median (worst {worst:.4f}) "
+                      f"-- sliver faces, not a refinement")
+            else:
+                print(f"LGR {lgr} {kw}: {tot} children, none below {floor:g} of "
+                      f"their siblings' median")
+
+
 if __name__ == '__main__':
     if sys.argv[1] == '--lgr-gap':
         lgr_gap(sys.argv[2])
+    elif sys.argv[1] == '--values':
+        compare_values(sys.argv[2], sys.argv[3])
+    elif sys.argv[1] == '--siblings':
+        siblings(sys.argv[2], sys.argv[3])
     else:
         inventory(sys.argv[1], sys.argv[2])
