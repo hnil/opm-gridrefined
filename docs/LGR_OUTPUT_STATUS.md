@@ -210,3 +210,71 @@ mechanical operation but not a small one, and it invalidates the build for a whi
 so it is a deliberate decision rather than something to slip in. Until then the
 regression suite gives no signal, which is its own cost -- it is why the two
 restart-output defects fixed today had to be found by hand against a reference.
+
+## Update: the reference's whole LGR transmissibility model (2026-08-27)
+
+Mapping the reference's refined NNCs back to their host cells through HOSTNUM
+settles what the reference does, and it is one rule, not several:
+
+| refined quantity, summed per coarse face | reference | analytic factor |
+|---|---|---|
+| `TRANX` across a parent boundary | 2.9999 (74 % within 0.001) | 3.0 |
+| `TRANY` across a parent boundary | 1.9999 (87 % within 0.001) | 2.0 |
+| `TRANZ` over the six children | 1.0004 (42 % within 0.001) | 1.0 |
+| fault NNC over its child faces | 2.982 | 3.0 |
+
+**The reference takes the host cell's transmissibility -- fault NNCs and their EDITNNC
+seals included -- and distributes it by the refinement factor.** OPM computes each
+child's own two-point transmissibility. On a near-regular grid the two coincide,
+which is why model2_lgr and Norne match on everything. On Drogon's cells -- 33 x 50
+x 2 m after refinement, dipping -- they do not, and the two-point calculation is
+itself on thin ice: those faces are strongly non-orthogonal, which is exactly the
+case TPFA is not consistent for. That is an argument that the reference's
+convention is not merely compatible but steadier here.
+
+`TRANY` is worth separating from `TRANX`: its median ratio to the reference is
+0.998, so it is unbiased, but the quartiles are 1.886 and 2.095 against the
+reference's 1.9997/2.0001 -- OPM has a +-5 % spread where the reference has none.
+Same convention difference, no systematic bias. `TRANX` is 0.637 and biased,
+because x is where this grid's distortion lies.
+
+### Fixed since: EDITNNC now reaches refined faces
+
+opm-simulators `4d1ca382d`. `globalToLocal` mapped a deck cell to one leaf cell and
+a refined cell's Cartesian index is its father's, so all children collided and the
+record was dropped. A coarse connection became a face between each pair of touching
+children, and a dimensionless multiplier belongs to all of them.
+
+| Drogon | before | after | reference |
+|---|---|---|---|
+| EDITNNC records dropped | 5365 | **264** (= what the unrefined deck drops) | -- |
+| refined fault NNC / coarse capacity | 10.7x, p90 612x | **1.91x** | 2.98x |
+| cumulative water at 212 d | 30399 | **32526** | 39326 |
+
+That is 24 % of the remaining water gap, and it removes a defect rather than a
+convention: the deck says those faults are ~80 % sealed and the refined region was
+ignoring it entirely.
+
+### Gap as a fraction of the effect being modelled
+
+Taking OPM's own coarse run as the baseline, at 212 days:
+
+| | FWPR | FWPT |
+|---|---|---|
+| coarse -> fine (OPM) | 230 -> 364, **+58 %** | 20263 -> 30399, **+50 %** |
+| fine -> reference | +75, +21 % | +8927, +29 % |
+| gap as a fraction of the refinement effect | **56 %** | **88 %** |
+
+So before today the disagreement with the reference was nearly as large as the
+whole effect of refining -- refinement moved the answer by 50 % and the codes
+disagreed by 44 % of that much again. After the EDITNNC fix the FWPT gap is 6800
+against a refinement effect of 12263, **55 %**; the partial `TRANX` experiment
+suggests the convention accounts for most of what is left.
+
+### Still open, in order of size
+
+| | |
+|---|---|
+| the lateral transmissibility convention | worth 20-25 % of water on this grid; a single consistent rule, so buildable as an option |
+| global `ICON`/`IWEL` for an LGR well | the section declares N connections and holds one. Tried reporting one entry per distinct host cell, which is what the reference does on Drogon (A4: 42 refined, 20 global) -- but the LGR unit tests assert the refined count where connections share a host, so the rule is not what I assumed and the change was reverted |
+| `MULTREGT` on refined faces | untested: every multiplier in Drogon's deck is 1.0 |
