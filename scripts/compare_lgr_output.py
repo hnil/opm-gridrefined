@@ -122,6 +122,13 @@ def siblings(egrid, init, floor=0.1):
     Needs no reference: HOSTNUM says which refined cells share a father, and a
     child whose TRAN* is a small fraction of its siblings' median is a sliver
     where a full face should be.
+
+    Calibrate against a grid you trust before reading anything into a count.  A
+    few per cent of the lateral faces are genuine slivers at fault
+    juxtapositions -- on Drogon the reference run itself flags 2577 TRANX
+    and 5335 TRANY children, against OPM's 2762 and 4788.  TRANZ is the sharp
+    one: the reference flags none, and OPM flagged 82897 of 166848 while the
+    refined-refined face centre was wrong.
     """
     ge = arrays(egrid)
     hosts = [i for i, (name, *_) in enumerate(ge) if name == 'HOSTNUM']
@@ -161,10 +168,10 @@ def siblings(egrid, init, floor=0.1):
                         bad += 1
                         if worst is None or v / mid < worst:
                             worst = v / mid
+            note = " <-- vertical faces should not do this" if kw == 'TRANZ' else ""
             if bad:
                 print(f"LGR {lgr} {kw}: {bad} of {tot} children below {floor:g} of "
-                      f"their siblings' median (worst {worst:.4f}) "
-                      f"-- sliver faces, not a refinement")
+                      f"their siblings' median (worst {worst:.4f}){note}")
             else:
                 print(f"LGR {lgr} {kw}: {tot} children, none below {floor:g} of "
                       f"their siblings' median")
