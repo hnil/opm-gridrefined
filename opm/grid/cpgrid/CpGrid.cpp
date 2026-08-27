@@ -1429,12 +1429,13 @@ const Dune::FieldVector<double,3> CpGrid::faceCenterEcl(int cell_index, int face
     assert (current_data_->back()->cell_to_point_[cell_index].size() == 8);
     Dune::FieldVector<double,3> center(0.0);
 
-    bool isCoarseCellInside = (intersection.inside().level() == 0);
-    bool isCoarseCellOutside = false;
-    if (intersection.neighbor()){
-        isCoarseCellOutside = (intersection.outside().level() == 0);
-    }
-    bool twoCoarseNeighboringCells = isCoarseCellInside && isCoarseCellOutside;
+    const bool isCoarseCellInside = (intersection.inside().level() == 0);
+    // Neighbours on the same level -- both coarse, or both children of a refinement --
+    // share a full face of cell_index, so the cell-corner average applies to them just as
+    // it does to two coarse cells. Only an LGR boundary face, which is a part of the
+    // coarse cell's face, needs the face's own points.
+    const bool sameLevelNeighbours = intersection.neighbor() &&
+        (intersection.inside().level() == intersection.outside().level());
     bool isOnGridBoundary_coarseNeighboringCell = intersection.boundary() && isCoarseCellInside && (!intersection.neighbor());
 
     // For CpGrid with LGRs, a refined face with a coarse neighboring cell and a refined neighboring cell
@@ -1446,7 +1447,7 @@ const Dune::FieldVector<double,3> CpGrid::faceCenterEcl(int cell_index, int face
     // cell_to_face_[cell_index - refined neighboring cell] = {bottom, front, left, right, back, top} = {2,3,1,4,0,5} with
     // the notation used in faceVxMap.
 
-    const bool useCellPoints = (maxLevel() == 0) || twoCoarseNeighboringCells || isOnGridBoundary_coarseNeighboringCell;
+    const bool useCellPoints = (maxLevel() == 0) || sameLevelNeighbours || isOnGridBoundary_coarseNeighboringCell;
     if (!useCellPoints) {
         // Refined face with a coarse and a refined neighbour (an LGR boundary).
         // The ECLIPSE convention is the four-vertex average; keep it for the
