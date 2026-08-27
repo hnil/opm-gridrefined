@@ -126,3 +126,87 @@ needs its own pass.
 | 6456 Drogon cells report `TRANZ` 0 where the reference bridges a `MINPV` gap | LGR NNC count is 8415 against 8408, so the connections are probably there and merely reported as NNCs |
 | `MINPVV`, `MULTPV`, `TOPS`, `CON` written by neither grid | not LGR-specific |
 | `GDORIENT` not written | cosmetic |
+
+## How much of the Drogon water gap is the refinement? (2026-08-27)
+
+`model2_lgr` has all four corners -- {reference, OPM} x {LGR, no LGR} -- on one deck,
+so the gap can be decomposed. Cumulative water at 973 days:
+
+| | no LGR | with LGR | refinement effect |
+|---|---|---|---|
+| reference | 62735 | 63428 | +1.11 % |
+| OPM | 66480 | 66609 | +0.19 % |
+
+The codes differ by **5.97 % with no refinement at all** and 5.01 % with it; their
+*responses to refinement* differ by 0.91 percentage points. On a near-Cartesian
+grid, refinement contributes essentially nothing to the gap -- and this is exactly
+the case where the two codes' `TRANX` agrees.
+
+Drogon has no coarse reference run, so it cannot be decomposed the same way, but the
+lateral transmissibility convention can be measured directly. `MULTIPLY TRANX` over
+the box reaches the faces a coarse face became -- the parent-boundary faces, one x-face
+in three -- and does so exactly (1.3106 requested, 1.3106 delivered to 27252 of 27252
+of them, nothing to the interior faces, which is correct: an interior face was not
+part of any coarse face). Putting just that third onto the reference's convention:
+
+| at 212 days | FWPR | FWPT |
+|---|---|---|
+| reference | 438.9 | 39326 |
+| OPM | 364.0 | 30399 |
+| OPM, boundary x-faces x1.31 | **405.0** | **34216** |
+
+One third of the x-faces closes **55 %** of the remaining water gap. So on Drogon,
+unlike model2, the gap is dominated by the refinement -- specifically by the
+lateral transmissibility convention, not by a baseline difference between the codes.
+
+For reference, OPM's own refinement effect on Drogon is +50 % on cumulative water
+(coarse control 20263 against 30399 refined).
+
+### Is a reference-compatible `TRANX` worth building?
+
+Probably, as an **option** rather than the default.
+
+For: it is worth 20-25 % of water production on a twisted grid, it makes a refined
+run reproduce the coarse model's flow capacity -- which is what a history-matched
+model wants and what anyone comparing against a reference expects -- and it would
+make every future comparison legible.
+
+Against: it discards the geometric information the refinement provides, which is
+part of why one refines. And it is not well defined everywhere: a face *interior*
+to a parent was never part of a coarse face, so there is nothing to inherit and the
+analytic factor has to stand in, which amounts to treating the parent as locally
+uniform. Graded refinement (`N*FIN`/`H*FIN`) and nested boxes need the rule spelled
+out too.
+
+The mechanism is settled enough to build on: the reference's refined `TRANX` summed across
+a parent boundary is the analytic refinement factor to within 0.001 for 74 % of
+cells, so it is scaling the host, and the host transmissibility is already to hand.
+
+## The 269 failing regression tests
+
+Not caused by this work: 270 fail without today's changes, 269 with them, the
+difference being `NNCTestsLGR` which today fixes.
+
+Every one of the 266 that classify is a restart **output** difference. The solution
+vectors (`PRESSURE`, `SWAT`), the INIT and the EGRID all compare clean.
+
+| | |
+|---|---|
+| 79 | `IWEL` item 12 (`PVTTab`) only |
+| 182 | `IWEL` item 12 plus `XGRP` item 139 |
+| 5 | other (`XWEL`, `TAB`, and three unclassified) |
+
+`PVTTab` is the well's PVT table number; we write it, the stored references have 0.
+The producing code is character-identical to upstream master, and the references are
+current (opm-tests is 2 commits behind, and those two regenerate 602 files and still
+carry 0). Our branch is **71 commits behind opm-common and 153 behind
+opm-simulators**, so the likeliest reading is that the branch and the reference data
+are out of step -- opm-common `dd8be7e85` "Store and restore well PVT table
+to/from restart" (2026-07-07) changed `IWEL`, and the references for these cases were
+last regenerated 2026-05-11.
+
+**To fix: bring the branch up to date with upstream and re-run.** That is a
+mechanical operation but not a small one, and it invalidates the build for a while,
+so it is a deliberate decision rather than something to slip in. Until then the
+regression suite gives no signal, which is its own cost -- it is why the two
+restart-output defects fixed today had to be found by hand against a reference.
