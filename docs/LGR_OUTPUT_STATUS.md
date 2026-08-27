@@ -28,9 +28,9 @@ whole arrays.
 | | model2_lgr (3x3x2) | Norne (3x3x1) | Drogon (3x2x1) |
 |---|---|---|---|
 | grid: ACTNUM, HOSTNUM, ZCORN | identical | identical | identical |
-| refined `COORD` | 33 % differ, to +7.8 % | 36 % differ, to +9.5 % | 56 % differ, to +3.8 % |
-| refined `DX` / `DY` | identical | +-3.7 % / +-0.9 % | +-2.1 % / +-0.7 % |
-| refined `PORV` | identical | +-3.9 % | +-2.5 % |
+| refined `COORD` | see below | see below | median 1.4 mm from the reference, tail to 6.7 m |
+| refined `DX` / `DY` | identical | close | median 0.012 % / 0.007 %, 5.2 % / 1.0 % of cells over 1 % |
+| refined `PORV` | identical | close | median 0.02 %, 6.7 % of cells over 1 % |
 | refined `DZ`, `DEPTH`, `PORO`, `NTG`, `PERM*` | identical | identical | identical |
 | refined `TRANX` | identical | median 1.0000 | **median 0.7632** |
 | refined `TRANY` | identical | median 1.0000 | median 1.0000, p1 0.669 p99 1.98 |
@@ -46,26 +46,42 @@ company.
 
 ## What this says
 
-**The refined lateral geometry is not the reference's.** The two codes place the
-refined pillars differently -- computing a corner's (x,y) at the same ZCORN depth
-from each file's `COORD` puts them a median of 1 cm and up to 10.6 m apart on
-Drogon. `ZCORN` is identical, so the *depths* agree; it is the pillars that do
-not. `DX`, `DY` and `PORV` follow, each spread a couple of per cent with the
-totals matching. Subdividing a corner-point cell laterally requires choosing where
-the new pillars go and there is no unique answer, so neither is wrong on its face
--- but it is the likely root of the transmissibility differences below, and it is
-worth deciding deliberately rather than inheriting.
+**The refined geometry is close, not different in kind.** Both files are
+internally consistent: each one's `DX` matches the `DX` rebuilt from its own
+`COORD` and `ZCORN` to 1e-4, so neither misdescribes its own grid. The refined
+pillars agree to a median of **1.4 mm**, with a tail to 6.7 m concentrated at
+faults; `DX` differs by a median of 0.012 % with 5.2 % of cells over 1 %. An
+earlier version of this note said "56 % differ, to +-4 %" -- that was a ratio taken
+on coordinate *values*, where a small absolute difference on a small x gives a
+large ratio. There is no case here for a different pillar-placement algorithm: the
+placement already agrees to millimetres, and matching the remaining tail would not
+move the transmissibilities.
 
-**Drogon's refined lateral transmissibilities are ~25-32 % low; Norne's are not.**
-`TRANX` at 0.763 and the refined NNCs at 0.678 are the same story from two
-directions. Norne, refined 3x3x1, matches; Drogon, refined 3x2x1, does not. The
-asymmetric refinement ratio is the obvious suspect and is not yet run down. Note
-the reference's refined `TRANX` summed across a parent boundary is *exactly* 3.0000x the
-host cell's, the analytic TPFA factor, so the reference distributes rather than
-recomputes -- which means the two are not strictly measuring the same thing.
+**`TRANX` is a convention difference, not a defect.** Summed across a parent
+boundary, the reference's refined `TRANX` over the host's is 3.0000 -- the analytic TPFA
+factor for 3x refinement -- for **74 % of cells to within 0.001**, with the
+quartiles at 2.9996 and 3.0002. That is the host's transmissibility scaled by the
+refinement ratio, not a geometric calculation on the child cells. OPM computes the
+children's own TPFA transmissibility, and gets 1.84-1.94 on Drogon's twisted
+cells. On near-regular grids the two coincide, which is why Norne and model2_lgr
+match exactly and Drogon does not. Neither is wrong; they are different quantities,
+and OPM's is the one that follows from the child geometry. It does mean the refined
+region is ~24 % less transmissive laterally than the reference's, which is
+consistent with the water still being short.
 
 **The global NNC list is truncated wherever a box covers it** (D4a). Unchanged,
 output only, and now measured on three cases.
+
+## Wells
+
+Checked at the one restart step the reference reached. In the **LGR section every
+connection factor is identical to the reference** -- `EffConnTrans`, `ConnTrans`,
+`EffectiveKH`, `SkinFactor`, `Diameter`, `Depth`, `EffectiveLength`, `CFDenom` --
+and `ICON` matches on cell I/J/K, status, direction, completion number and
+connection index. Two output defects were found and fixed (see below); a third is
+open: in the **global** section the reference lists all of a well's connections mapped
+back to their host cells (A4: 20 globally against 42 in the LGR) while OPM lists
+one.
 
 ## Fixed today
 
@@ -82,6 +98,15 @@ output only, and now measured on three cases.
   lags its global section.
 - **PINCH and MULTREGT connections a box swallows** are now counted and reported
   (opm-simulators `cf1d15214`). Untested against a case that makes them fire.
+- **`ICON`/`SCON` under `RPTRST NORST=1`** (opm-common `07f3b320a`). They were
+  gated off while `XCON` was still written, so the dynamic connection results had
+  no geometry to attach to and a post-processor could not place the well. The reference
+  writes both at NORST=1. Not LGR-specific -- any deck with `NORST=1` was affected,
+  and Drogon asks for it.
+- **The global `IWEL` connection count for an LGR well** (same commit). It carried
+  the full count while the global `ICON` deliberately holds one connection, so a
+  reader trusting the count read unfilled slots and placed connections in cell
+  (0,0,0) with status zero.
 - **`NNCTestsLGR`** asserted the pre-`9cc2e3dbf` count in an NNCL/NNCG header.
 
 Regression check: the full suite fails 270 tests without today's changes and 269
@@ -95,8 +120,8 @@ needs its own pass.
 
 | | |
 |---|---|
-| refined lateral geometry differs from the reference | pillars, hence DX/DY/PORV; decide the convention |
-| Drogon refined `TRANX` 0.763 and refined NNC 0.678 | Norne is clean, so start from the 3x2x1 vs 3x3x1 difference |
+| Drogon refined `TRANX` 0.763 and refined NNC 0.678 | a convention difference -- the reference scales the host's value by the refinement ratio, OPM computes the child's. Decide which we want |
+| global `ICON` lists one connection for an LGR well | the reference lists all of them at their host cells |
 | global NNC list truncated inside a box | D4a, output only |
 | 6456 Drogon cells report `TRANZ` 0 where the reference bridges a `MINPV` gap | LGR NNC count is 8415 against 8408, so the connections are probably there and merely reported as NNCs |
 | `MINPVV`, `MULTPV`, `TOPS`, `CON` written by neither grid | not LGR-specific |
