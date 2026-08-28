@@ -331,19 +331,34 @@ restriction is stated outright rather than inferred.
 
 ### Parallel
 
-The flag runs in parallel: np=2 on Norne applies to the same face counts as serial.
-But it **cannot be validated there**, because a refined grid's transmissibilities
-already differ wildly between serial and parallel without it:
+The **simulation is correct in parallel**, with the flag and without it. Norne LGR
+at the last step:
+
+| | FOPT | FWPT | FPR |
+|---|---|---|---|
+| serial, flag off | 6.721251e7 | 2.329082e7 | 272.082 |
+| np=2, flag off | 6.721425e7 | 2.329184e7 | 272.123 |
+| serial, flag on | 6.771425e7 | 2.349722e7 | 269.597 |
+| np=2, flag on | 6.770542e7 | 2.350148e7 | 269.560 |
+
+Serial and np=2 agree to five significant figures either way, and the flag moves
+them both by the same amount, so it is parallel-correct.
+
+What is **not** right in parallel is the INIT's refined transmissibility *output*:
 
 | Norne refined section, median vs reference | TRANX | TRANY | TRANZ |
 |---|---|---|---|
 | serial | 1.0000 | 1.0000 | 0.9999 |
 | np=2 | 0.9318 | 0.9942 | **24.13** |
 
-`PORV` and `DEPTH` match serial exactly, so the geometry is right and it is the
-transmissibility that is wrong. Identical with the flag off and on, so it is not
-this work. **A parallel LGR run's vertical transmissibility is 24x the reference** --
-that is a defect of its own and needs its own pass.
+`PORV` and `DEPTH` match serial exactly, and the summary above shows the run itself
+is fine, so this is the writer, not the solver. Identical with the flag off and on,
+so it is not this work, and the flag does not reach it: passing the flag to
+`allocTrans`'s `globalTrans_` changed nothing, so that is not the object the
+parallel INIT is written from. Tried and reverted rather than shipped, since
+`globalTrans_` also drives load balancing. **Open, and it needs its own pass** --
+until it is closed, a parallel refined run cannot be compared against a reference
+at all.
 
 ### Systematic coverage
 
@@ -354,7 +369,8 @@ that is a defect of its own and needs its own pass.
 | uniform, graded, and boxes refined differently | same rule; ratios come from geometry, not the deck |
 | `MULT*` and EDIT-section `TRAN*` | preserved: the override runs before them |
 | `EDITNNC`/`EDITNNCR` | fixed separately (`4d1ca382d`), applies to every child face |
-| deck `NNC`, `PINCH` NNC, `MULTREGT` NNC | **not fixed** -- these carry an absolute transmissibility, which cannot be split among child faces without area weighting. They still use the one-cell map and still drop inside a box; the PINCH and MULTREGT paths now at least say so |
+| `PINCH` NNC | **fixed** (`f98c71fb0`): divided among the child pairs, n pairs each taking r_d/n. Correct by construction; no deck here puts a pinch connection inside a box, so it is not exercised numerically |
+| deck `NNC`, numerical aquifers, `MULTREGT` NNC | **refused** (`f98c71fb0`) rather than silently misapplied. An NNC's transmissibility is absolute like PINCH's but is the user's number rather than one we computed, and MULTREGT's multiplier reaches at most one of the faces the connection became. MULTREGT only refuses where the multiplier is not 1 |
 | cell properties (`PORO`, `PERM*`, `NTG`, regions, endpoints) | on the leaf via `LookUpData`; endpoints added this session |
 
 ### Where Drogon stands after this turn
