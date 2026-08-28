@@ -279,51 +279,91 @@ suggests the convention accounts for most of what is left.
 | global `ICON`/`IWEL` for an LGR well | the section declares N connections and holds one. Tried reporting one entry per distinct host cell, which is what the reference does on Drogon (A4: 42 refined, 20 global) -- but the LGR unit tests assert the refined count where connections share a host, so the rule is not what I assumed and the change was reverted |
 | `MULTREGT` on refined faces | untested: every multiplier in Drogon's deck is 1.0 |
 
-## `--lgr-trans-from-host` (opm-simulators `3016700d2`)
+## `--lgr-trans-from-host` (opm-simulators `742d79a36`)
 
-The reference's rule, offered behind a flag. Across a host cell's own faces each
-child takes `T_host * r_dir / n`. Two kinds of face are left computed:
+**Host** here is the level-zero cell a refined cell was refined out of -- the term
+the reference uses, and what `HOSTNUM` in the EGRID names.
 
-- **interior to a host cell** -- they were not part of any coarse face, so there is
-  nothing to inherit;
-- **normal to a direction that is not subdivided** -- the child face is the host
-  face already. This also keeps the host transmissibility computed here (plain
-  level-zero geometry, no `PINCH` or `MINPV` processing behind it) out of the
-  vertical. Without that guard Drogon's `TRANZ` went from 0.998 of the reference to
-  0.870: on a pinched-out grid the vertical host value is mostly that processing,
-  and recomputing it from geometry loses it.
+The rule, applied to every lateral face of every refined cell, interior to a host
+or between two:
 
-Drogon at 212 days, against its reference:
+    half_child = half_host * (A_child / A_host) * (d_host / d_child)
 
-| | TRANX across a boundary | interior TRANX | FWPR | FWPT | WWPR:A2 |
-|---|---|---|---|---|---|
-| reference | 2.9999 | -- | 438.9 | 39326 | 424.5 |
-| computed | 1.9113 | 0.78 of ref | 363.6 | 32526 | 345.6 |
-| **from host** | **3.0000** | 0.78 of ref | **426.0** | **36347** | **409.9** |
+with A the face area and d the cell-centre-to-face distance; the two sides are then
+harmonic-averaged as everywhere else. For a uniform `r_x x r_y x r_z` that is
+exactly `half_host * r_d / (r_a * r_b)`, so the child faces of one host face still
+sum to `r_d` times the host's. Deriving the ratios from geometry rather than the
+deck's refinement counts is what makes a **graded box** work: `N*FIN`/`H*FIN` gives
+each parent its own subdivision, and Norne -- the one case here with a
+reference for graded refinement -- is graded. (`geometryInFather()` would have been
+the obvious source and throws for graded refinement; areas and distances are always
+there.)
 
-Per child position the boundary faces go from 0.638 of the reference to **1.001**;
-the interior ones are untouched at 0.78 by design. `TRANY`, already at 1.000, stays
-there. The FWPR gap falls from 75.3 to **12.9**, the FWPT gap from 6800 to 2979.
+It runs **before** `updateFromEclState_`, so the deck's `TRANX`/`MULT*` land on top
+as they do everywhere else. Run the other way round and the override discards them:
+on Drogon that is the difference between FWPT 39603 and 39124 against the
+reference's 39326.
 
-Refused for a graded box (`N*FIN`/`H*FIN`), where there is no single factor per
-direction, and in parallel. **Off by default.** With it on, model2_lgr and Norne
-still agree with their references to 1.0001, so it does not disturb the cases that
-were already right.
+| per-cell median vs reference | TRANX | TRANY | TRANZ |
+|---|---|---|---|
+| Drogon 3x2x1 | 0.7632 -> **0.9993** | 1.0000 -> 0.9999 | 0.9994 (untouched) |
+| Norne graded | 1.0000 -> 0.9958 | 1.0000 -> 0.9998 | 0.9999 (untouched) |
+| model2 3x3x2 | 1.0000 -> 1.0000 | 1.0000 -> 1.0000 | 1.0000 (untouched) |
 
-Known limitation: on model2_lgr 1036 of 1468 host-cell boundaries had no host
-transmissibility and were left computed -- the level-zero pass only sees face
-neighbours, so pinch and NNC host pairs are missed. It does not hurt there (that
-deck's computed values already match), but on a deck that needs them it would be a
-gap.
+Drogon at 212 days:
+
+| | FWPR | FWPT | WWPR:A2 |
+|---|---|---|---|
+| reference | 438.9 | 39326 | 424.5 |
+| computed | 363.6 | 32526 | 345.6 |
+| **from host** | **438.3** | **39124** | **420.9** |
+
+### Vertical faces are deliberately left computed
+
+A host's vertical transmissibility on a corner-point grid is largely `PINCH` and
+`MINPV` processing, and the level-zero pass recomputes it from raw geometry, which
+does not reproduce that: overriding the vertical took Drogon's `TRANZ` from 0.999 of
+its reference to 0.93. With no subdivision in z the computed value is already the
+host's, so there is nothing to gain either. Two attempts to detect "not subdivided
+in this direction" geometrically -- comparing centre-to-face distances, then
+volume/area ratios -- both failed to fire on Drogon's sheared cells, so the
+restriction is stated outright rather than inferred.
+
+### Parallel
+
+The flag runs in parallel: np=2 on Norne applies to the same face counts as serial.
+But it **cannot be validated there**, because a refined grid's transmissibilities
+already differ wildly between serial and parallel without it:
+
+| Norne refined section, median vs reference | TRANX | TRANY | TRANZ |
+|---|---|---|---|
+| serial | 1.0000 | 1.0000 | 0.9999 |
+| np=2 | 0.9318 | 0.9942 | **24.13** |
+
+`PORV` and `DEPTH` match serial exactly, so the geometry is right and it is the
+transmissibility that is wrong. Identical with the flag off and on, so it is not
+this work. **A parallel LGR run's vertical transmissibility is 24x the reference** --
+that is a defect of its own and needs its own pass.
+
+### Systematic coverage
+
+| | |
+|---|---|
+| `TRANX`/`TRANY`/`TRANZ` | one code path, direction taken from the face index -- no per-direction special cases |
+| interior and host-boundary faces | same rule, same formula |
+| uniform, graded, and boxes refined differently | same rule; ratios come from geometry, not the deck |
+| `MULT*` and EDIT-section `TRAN*` | preserved: the override runs before them |
+| `EDITNNC`/`EDITNNCR` | fixed separately (`4d1ca382d`), applies to every child face |
+| deck `NNC`, `PINCH` NNC, `MULTREGT` NNC | **not fixed** -- these carry an absolute transmissibility, which cannot be split among child faces without area weighting. They still use the one-cell map and still drop inside a box; the PINCH and MULTREGT paths now at least say so |
+| cell properties (`PORO`, `PERM*`, `NTG`, regions, endpoints) | on the leaf via `LookUpData`; endpoints added this session |
 
 ### Where Drogon stands after this turn
 
 | at 212 days | FWPR | FWPT |
 |---|---|---|
 | reference | 438.9 | 39326 |
-| start of the turn | 364.0 | 30399 |
+| start of the session | 364.0 | 30399 |
 | + EDITNNC reaching refined faces | 363.6 | 32526 |
-| + transmissibility from host | **426.0** | **36347** |
+| + transmissibility from host, all lateral faces | **438.3** | **39124** |
 
-Cumulative-water gap 8927 -> 2979, **67 % closed**; rate gap 75 -> 13, **83 %**.
-What is left is the interior faces, which by construction this does not touch.
+Cumulative-water gap 8927 -> 202, **98 % closed**; rate gap 75 -> 0.6.
