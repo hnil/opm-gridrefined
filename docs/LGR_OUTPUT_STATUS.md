@@ -351,14 +351,26 @@ What is **not** right in parallel is the INIT's refined transmissibility *output
 | serial | 1.0000 | 1.0000 | 0.9999 |
 | np=2 | 0.9318 | 0.9942 | **24.13** |
 
-`PORV` and `DEPTH` match serial exactly, and the summary above shows the run itself
-is fine, so this is the writer, not the solver. Identical with the flag off and on,
-so it is not this work, and the flag does not reach it: passing the flag to
-`allocTrans`'s `globalTrans_` changed nothing, so that is not the object the
-parallel INIT is written from. Tried and reverted rather than shipped, since
-`globalTrans_` also drives load balancing. **Open, and it needs its own pass** --
-until it is closed, a parallel refined run cannot be compared against a reference
-at all.
+`PORV`, `DEPTH` and `PERMX` match serial exactly, and the summary above shows the
+run itself is fine, so this is the writer, not the solver. Identical with the flag
+off and on, so it is not this work.
+
+Narrowed, not fixed. What is known:
+
+- the **global (unrefined) section is fine**: 1797 of 44431 `TRANX` differ between
+  serial and np=2, and those are the cells on the box boundary. It is the **LGR
+  section** that is wrong -- 18119 of 19206.
+- so it is not a general permeability or field-property misalignment in
+  `allocTrans`'s `globalTrans_`; it is specific to the refined levels of the writer,
+  around `equilGrid`/`outputGrid_` and the level index helpers in `computeTrans_`.
+- two candidate fixes were tried and **reverted** because neither changed the
+  numbers: passing `--lgr-trans-from-host` through to `allocTrans`, and skipping the
+  equilGrid-to-grid remap in `computeTrans_` when the writer holds the vanguard's
+  global transmissibility (which is already on the equilGrid). The second is
+  plausible on inspection and still wrong in practice, so the remap is not the cause.
+
+**Open.** The right test needs no reference: serial and np=2 must write the same
+arrays, and today they do not.
 
 ### Systematic coverage
 
