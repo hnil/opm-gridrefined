@@ -278,3 +278,52 @@ suggests the convention accounts for most of what is left.
 | the lateral transmissibility convention | worth 20-25 % of water on this grid; a single consistent rule, so buildable as an option |
 | global `ICON`/`IWEL` for an LGR well | the section declares N connections and holds one. Tried reporting one entry per distinct host cell, which is what the reference does on Drogon (A4: 42 refined, 20 global) -- but the LGR unit tests assert the refined count where connections share a host, so the rule is not what I assumed and the change was reverted |
 | `MULTREGT` on refined faces | untested: every multiplier in Drogon's deck is 1.0 |
+
+## `--lgr-trans-from-host` (opm-simulators `3016700d2`)
+
+The reference's rule, offered behind a flag. Across a host cell's own faces each
+child takes `T_host * r_dir / n`. Two kinds of face are left computed:
+
+- **interior to a host cell** -- they were not part of any coarse face, so there is
+  nothing to inherit;
+- **normal to a direction that is not subdivided** -- the child face is the host
+  face already. This also keeps the host transmissibility computed here (plain
+  level-zero geometry, no `PINCH` or `MINPV` processing behind it) out of the
+  vertical. Without that guard Drogon's `TRANZ` went from 0.998 of the reference to
+  0.870: on a pinched-out grid the vertical host value is mostly that processing,
+  and recomputing it from geometry loses it.
+
+Drogon at 212 days, against its reference:
+
+| | TRANX across a boundary | interior TRANX | FWPR | FWPT | WWPR:A2 |
+|---|---|---|---|---|---|
+| reference | 2.9999 | -- | 438.9 | 39326 | 424.5 |
+| computed | 1.9113 | 0.78 of ref | 363.6 | 32526 | 345.6 |
+| **from host** | **3.0000** | 0.78 of ref | **426.0** | **36347** | **409.9** |
+
+Per child position the boundary faces go from 0.638 of the reference to **1.001**;
+the interior ones are untouched at 0.78 by design. `TRANY`, already at 1.000, stays
+there. The FWPR gap falls from 75.3 to **12.9**, the FWPT gap from 6800 to 2979.
+
+Refused for a graded box (`N*FIN`/`H*FIN`), where there is no single factor per
+direction, and in parallel. **Off by default.** With it on, model2_lgr and Norne
+still agree with their references to 1.0001, so it does not disturb the cases that
+were already right.
+
+Known limitation: on model2_lgr 1036 of 1468 host-cell boundaries had no host
+transmissibility and were left computed -- the level-zero pass only sees face
+neighbours, so pinch and NNC host pairs are missed. It does not hurt there (that
+deck's computed values already match), but on a deck that needs them it would be a
+gap.
+
+### Where Drogon stands after this turn
+
+| at 212 days | FWPR | FWPT |
+|---|---|---|
+| reference | 438.9 | 39326 |
+| start of the turn | 364.0 | 30399 |
+| + EDITNNC reaching refined faces | 363.6 | 32526 |
+| + transmissibility from host | **426.0** | **36347** |
+
+Cumulative-water gap 8927 -> 2979, **67 % closed**; rate gap 75 -> 13, **83 %**.
+What is left is the interior faces, which by construction this does not touch.
