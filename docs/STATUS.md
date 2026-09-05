@@ -98,7 +98,10 @@ branch (separate, not pushed in this round).
 | **Restart from an LGR run (serial)** | ✓ | per-level solution sections read and the leaf assembled; Norne restarts at step 101, tracking the uninterrupted run to 0.2 % |
 | **Parallel INIT transmissibilities** | ✓ | serial and np=2 INIT identical, LGR section included (opm-simulators `f881e132a`, 2026-09-05); was the father's value per refined cell |
 | **Deck NNC / aquifer / MULTREGT inside a box, parallel** | ✗→err | refused on every rank before load balancing (`0416df2d1`); used to hang at np>1 |
-| **`--well-refine` rings around wells** (adaptive executable) | ✓ prototype | nested rings from the well's connections; `WELL-ZONE-REFINEMENT.md` |
+| **`WELLREF` keyword: nested rings around wells** | ✓ | expanded to CARFIN blocks at parse time (opm-common `9c394618f`); COMPDAT wells moved into the rings by index with rescaled CF (`0047b10d4`), matching a hand-written COMPDATL to 7 digits; `WELL-ZONE-REFINEMENT.md` |
+| **A well completed in several LGRs** | ✓ solve | each connection resolves in its own LGR (`0cbe37b9a`); restart output still files the well under one section (D11) |
+| **Nested LGR INIT/UNRST/NNC sections** | ✓ | written in EGRID order with the child's own label (`bed1a8b0d`) |
+| **Nested LGR in parallel with host transmissibility** | ✗→err | refused; run serial or `--lgr-trans-from-host=false` (D9) |
 | Restart from an LGR run (parallel) | ✗→err | the reference grid holding the leaf ordering is on the I/O rank only; refused with a message |
 | Redistribution / rebalancing a distributed grid | ✗ | CpGrid-level gap; belongs to dynamic AMR (`REDISTRIBUTION-status.md`) |
 | Dynamic AMR | ◐ | `AdaptiveCpGrid` first cut (refine-after-construction, re-adaptable); no coarsening / cross-adapt data transfer / parallel adapt yet (`DESIGN-parallel-octree.md`) |
