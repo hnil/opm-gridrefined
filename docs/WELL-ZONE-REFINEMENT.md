@@ -102,9 +102,14 @@ the prototype's, in `EclipseState/Grid/WellRefinement.{hpp,cpp}`, so
 `--well-refine` and `WELLREF` build the same boxes. Everything downstream is the
 deck-CARFIN route: `LgrCollection`, the `EclipseGrid` LGR tree, the grid
 builder, EGRID/INIT/UNRST sections per LGR, ResInsight. `EclipseState::
-hasWellRefinement()` tells the vanguard to synthesize trajectories for the
-COMPDAT wells before the replay places them in the refined cells (serial only
-for now: the synthesis reads the input grid, which only the I/O rank holds).
+hasWellRefinement()` is kept, but placement no longer needs it: every COMPDAT
+connection inside a box is moved into the innermost LGR by index
+(`WellConnections::refineIntoLgrs`, called from `CpGridVanguard::addLgrs` for
+every deck with LGRs), the centre column laterally and every refined cell along
+the connection's direction, with the connection factor rescaled per child. No
+grid is read, so it is identical on every rank and does not suffer the
+trajectory-synthesis overshoot on sheared cells. On model2 it reproduces a
+hand-written `WELSPECL`/`COMPDATL` completion to seven digits.
 
 Answering the question whether the refined grid "is an LGR": with `WELLREF` it
 is a combination of ordinary LGRs, nested where the rings nest; with
@@ -117,14 +122,21 @@ Unit test: `tests/parser/WellRefinementTests.cpp` (two nested rings on model2's
 PROD1 give `CARFIN 'WR1R1B1' 4 8 1 5 16 21 15 15 6` and
 `CARFIN 'WR1R2B1' 4 12 4 12 2 5 27 27 4 'WR1R1B1'`).
 
-### Lifting "one LGR per well"
+### "One LGR per well": lifted for the solve
 
-The connections already carry their own grid number (`Connection::
-get_lgr_level()`); the restriction is that `Well` is tagged with one LGR
-(`Well.cpp` throws when connections span two) and the vanguard resolves every
-connection against that tag (`compressedIndexForInteriorLGR(lgr_tag, conn)`).
-Resolving per connection and dropping the two throws is a day's work on the
-simulation side. What does not follow is the ECL output: `WELSPECL`/`COMPDATL`
-and the per-LGR well arrays name one LGR per well, and the reference format
-has no representation for a well in two LGRs short of `AMALGAM`. The rings
-avoid the need: every perforation lies in the innermost ring by construction.
+Each connection now resolves in its own LGR (`CpGridVanguard::
+compressedIndexForConnection`; opm-simulators `0cbe37b9a`), and the two
+refusals in `Well::updateConnections` are gone. A well completed across two
+stacked boxes (`TEST_CARFIN_PROD1_SPLIT.DATA`) runs. What does not follow is
+the restart output: the writer files a well under its tag's section only
+(gap D11), and the reference format has no representation for a well in two
+LGRs short of `AMALGAM`.
+
+### Status of the pieces (2026-09-05, evening)
+
+- Nested INIT/UNRST/NNC sections: fixed (D8), both rings loadable.
+- WELLREF at np=2: the single-ring case matches serial; the nested ring pair
+  is refused with the host-transmissibility default (D9) and runs with
+  `--lgr-trans-from-host=false`.
+- `COMPDATL` in a nested block fails at parse time (D10); the automatic
+  conversion is the way to complete a well in a nested ring.
