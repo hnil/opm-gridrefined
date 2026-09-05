@@ -96,11 +96,19 @@ branch (separate, not pushed in this round).
 | Whole-grid (box==grid) LGR in parallel | ✗→err | needs distributed refinement; rank-interior refuses clearly |
 | Nested boundary-touching child | ✗→err | rejected with containment message |
 | **Restart from an LGR run (serial)** | ✓ | per-level solution sections read and the leaf assembled; Norne restarts at step 101, tracking the uninterrupted run to 0.2 % |
+| **Parallel INIT transmissibilities** | ✓ | serial and np=2 INIT identical, LGR section included (opm-simulators `f881e132a`, 2026-09-05); was the father's value per refined cell |
+| **Deck NNC / aquifer / MULTREGT inside a box, parallel** | ✗→err | refused on every rank before load balancing (`0416df2d1`); used to hang at np>1 |
+| **`--well-refine` rings around wells** (adaptive executable) | ✓ prototype | nested rings from the well's connections; `WELL-ZONE-REFINEMENT.md` |
 | Restart from an LGR run (parallel) | ✗→err | the reference grid holding the leaf ordering is on the I/O rank only; refused with a message |
 | Redistribution / rebalancing a distributed grid | ✗ | CpGrid-level gap; belongs to dynamic AMR (`REDISTRIBUTION-status.md`) |
 | Dynamic AMR | ◐ | `AdaptiveCpGrid` first cut (refine-after-construction, re-adaptable); no coarsening / cross-adapt data transfer / parallel adapt yet (`DESIGN-parallel-octree.md`) |
 
 ## New / notable run options
+
+- `--lgr-trans-from-host` (default **on** since 2026-09-04) — a refined cell's
+  lateral transmissibility is its host's, scaled by the child's face area and
+  centre-to-face distance, as the reference does; vertical faces are computed.
+  `=false` recomputes everything from the child geometry (`LGR_OUTPUT_STATUS.md`).
 
 - `--refine-before-redistribute=true` — refine the full grid on rank 0 then
   distribute the leaf (better balance for big LGRs). Default off = rank-interior
@@ -236,6 +244,7 @@ active-versus-Cartesian family and both invisible to the all-active test decks:
 - **Parallel solver empty-partition** — handled by workarounds (ilu0 / coarsenTarget
   / HYPRE); a true min-per-rank AMG redistribution is upstream Dune work.
 - **MINPV in the parallel output grid** — not yet handled.
+- **`SPE1CASE1_CARFIN1-3DCORNERPOINT_XYZ-NON`** — serial and np=2 field rates differ by 2 % with and without host transmissibility; pre-existing, not attributed.
 - **Incompatible (non-multiple) touching subdivisions** — clear error (genuinely
   non-conformal). Compatible (A2) and faulted box↔box (A5) now build; only the
   edge/corner 1-D mosaic and mixed nesting remain unimplemented.

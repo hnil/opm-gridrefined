@@ -34,11 +34,28 @@
 #     opm-common FAULTS parsing, unrelated to the grid; faulted corner-point LGR
 #     is suspect in master anyway).
 #
+#
+# 2026-09-05 (host transmissibility on by default, opm-simulators 8d902abbe):
+#   * The corner-point decks and AQUFETP now show fork==master FAIL and
+#     CARFIN1 ser==par Lnz. Checked by hand: the fork's summaries (with the
+#     flag on AND off) are identical to master's on every common report row
+#     (FOPR, FPR); only the ministep count differs (e.g. 148 vs 151), and
+#     the script's field-rate fallback misaligns rows on these decks, so it
+#     reports FAIL where the answer is Lnz. Recorded as the script reports
+#     it until the fallback is fixed; do not read these FAILs as a solution
+#     change.
+#   * 3DCORNERPOINT_XYZ-NON now runs; serial and np=2 field rates differ by
+#     2 % with the flag on and 2.5 % off -- pre-existing, not attributed.
+#   * AQUNUM_IN_LGR is refused (deck aquifer inside the box) on every rank.
+#
 SPE1CASE1_CARFIN                          1e-6  1e-6
-SPE1CASE1_CARFIN1                         1e-6  1e-6
-SPE1CASE1_CARFIN1-2DCORNERPOINT_XY        1e-6  1e-6
-SPE1CASE1_CARFIN1-3DCORNERPOINT_XYZ       1e-6  Lnz
-SPE1CASE1_CARFIN1-3DCORNERPOINT_XYZ-NON   -     -
+SPE1CASE1_CARFIN1                         1e-6  Lnz
+SPE1CASE1_CARFIN1-2DCORNERPOINT_XY        FAIL  1e-6
+SPE1CASE1_CARFIN1-3DCORNERPOINT_XYZ       FAIL  1e-6
+SPE1CASE1_CARFIN1-3DCORNERPOINT_XYZ-NON   -     FAIL
 SPE1CASE1_CARFIN_FLEX                     1e-6  1e-6
 SPE1CASE1_CARFIN_GR                       Lnz   -
 SPE1CASE1_CARFIN_FAULTS                   -     -
+SPE1CASE1_CARFIN1_AQUFETP                 FAIL  1e-6
+SPE1CASE1_CARFIN1_AQUNUM                  -     1e-6
+SPE1CASE1_CARFIN1_AQUNUM_IN_LGR           -     -
