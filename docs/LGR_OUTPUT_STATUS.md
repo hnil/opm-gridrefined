@@ -164,7 +164,8 @@ For reference, OPM's own refinement effect on Drogon is +50 % on cumulative wate
 
 ### Is a reference-compatible `TRANX` worth building?
 
-Probably, as an **option** rather than the default.
+Built, and **on by default since 2026-09-04** (`--lgr-trans-from-host`; set it
+to false for the geometric recompute). The arguments either way:
 
 For: it is worth 20-25 % of water production on a twisted grid, it makes a refined
 run reproduce the coarse model's flow capacity -- which is what a history-matched
@@ -279,7 +280,7 @@ suggests the convention accounts for most of what is left.
 | global `ICON`/`IWEL` for an LGR well | the section declares N connections and holds one. Tried reporting one entry per distinct host cell, which is what the reference does on Drogon (A4: 42 refined, 20 global) -- but the LGR unit tests assert the refined count where connections share a host, so the rule is not what I assumed and the change was reverted |
 | `MULTREGT` on refined faces | untested: every multiplier in Drogon's deck is 1.0 |
 
-## `--lgr-trans-from-host` (opm-simulators `742d79a36`)
+## `--lgr-trans-from-host` (opm-simulators `87707eb54`, `a1e452a02`; default on since 2026-09-04)
 
 **Host** here is the level-zero cell a refined cell was refined out of -- the term
 the reference uses, and what `HOSTNUM` in the EGRID names.
@@ -369,8 +370,15 @@ Narrowed, not fixed. What is known:
   global transmissibility (which is already on the equilGrid). The second is
   plausible on inspection and still wrong in practice, so the remap is not the cause.
 
-**Open.** The right test needs no reference: serial and np=2 must write the same
-arrays, and today they do not.
+**Fixed 2026-09-05** (opm-simulators `f881e132a`). The writer walked `equilGrid`, which
+a parallel run leaves coarse, so it produced transmissibilities for level zero
+only, and opm-common's INIT writer then filled each LGR section from the global
+array through the father map: every refined cell got its father's value. The
+writer now walks the refined reference grid the cell data is gathered on, and
+the vanguard builds a transmissibility on that grid inside `allocTrans` (where
+the field properties are still global). `SPE1CASE1_CARFIN1-3DCORNERPOINT_XYZ`
+serial and np=2 INIT files are identical, LGR section included, and the LGR NNC
+arrays the parallel file lacked are written.
 
 ### Systematic coverage
 
