@@ -76,30 +76,55 @@ aspect-ratio argument asks for.
 5. Grading is uniform per ring; `H*FIN`-style columns inside a ring are not
    generated (they would be wrong for the mechanics anyway).
 
-## The keyword form
-
-The GRID section is parsed before the SCHEDULE, so a keyword naming wells
-cannot be resolved inside `EclipseState`; it has to be resolved where the
-deck's wells are known and then written back as ordinary CARFIN blocks, so
-that the grid builder, the EGRID/INIT writer and ResInsight see nothing new.
-Proposed:
+## The keyword: `WELLREF` (opm-common, implemented 2026-09-05)
 
 ```
+GRID
 WELLREF
--- well    ring widths   factor     layers   klayers
-  'PROD*'  2 1           3 3 1      PERF     0 /
-  'INJ1'   1             5 5 1      ALL      /
+-- well    NX NY NZ  RING1 RING2 RING3  LAYERS  KLAYERS
+  'PROD*'   3  3  1    1     1     0     PERF     0 /
+  'INJ1'    5  5  1    2                 ALL        /
 /
 ```
 
-- Parsed into a small `WellRefinement` record set (opm-common, GRID section,
-  keyword JSON + `EclipseState` accessor), no geometry work.
-- Resolved in the vanguard after the Schedule exists, with exactly the ring
-  construction the prototype has, into `Carfin` objects added to the
-  `LgrCollection`, followed by the `EclipseGrid` LGR tree update
-  (`create_lgr_cells_tree` / `updateLgrActiveCells`) so output and restart
-  are the deck-CARFIN route. Wells inside the boxes then need either
-  `COMPDATL` conversion or the replay; the replay is what the prototype uses.
-- Alternative that avoids touching `EclipseState` after construction: expand
-  `WELLREF` into CARFIN blocks at deck level in a pre-pass that reads `COMPDAT`
-  from the raw deck. Cheaper, and it makes the expansion visible in the PRT.
+One record per well pattern: the refinement factor of every ring relative to
+the ring outside it, up to three ring widths in coarse cells (outermost first,
+zero means absent), whether the K range is the completed layers (`PERF`,
+default) or the whole column (`ALL`), and extra layers above and below.
+
+The keyword is expanded **at parse time** (`Parser.cpp`,
+`expandWellRefinement`) into ordinary `CARFIN ... ENDFIN` blocks inserted right
+after it in the GRID section, named `WR<record>R<ring>B<box>`, an inner ring
+carrying its outer ring as `PARENT`. Seeds are the wells' `WELSPECS` heads and
+`COMPDAT` cells read from the raw deck (defaulted I/J take the head; wells
+completed only by `COMPTRAJ` are skipped with a warning). The ring geometry is
+the prototype's, in `EclipseState/Grid/WellRefinement.{hpp,cpp}`, so
+`--well-refine` and `WELLREF` build the same boxes. Everything downstream is the
+deck-CARFIN route: `LgrCollection`, the `EclipseGrid` LGR tree, the grid
+builder, EGRID/INIT/UNRST sections per LGR, ResInsight. `EclipseState::
+hasWellRefinement()` tells the vanguard to synthesize trajectories for the
+COMPDAT wells before the replay places them in the refined cells (serial only
+for now: the synthesis reads the input grid, which only the I/O rank holds).
+
+Answering the question whether the refined grid "is an LGR": with `WELLREF` it
+is a combination of ordinary LGRs, nested where the rings nest; with
+`--well-refine` it is the same grid but the deck does not know, so no ECL
+output. A single LGR around the whole grid is `RING1` large enough and
+`LAYERS ALL` (clamped to the grid), but note the parallel model refuses a box
+that spans the whole grid.
+
+Unit test: `tests/parser/WellRefinementTests.cpp` (two nested rings on model2's
+PROD1 give `CARFIN 'WR1R1B1' 4 8 1 5 16 21 15 15 6` and
+`CARFIN 'WR1R2B1' 4 12 4 12 2 5 27 27 4 'WR1R1B1'`).
+
+### Lifting "one LGR per well"
+
+The connections already carry their own grid number (`Connection::
+get_lgr_level()`); the restriction is that `Well` is tagged with one LGR
+(`Well.cpp` throws when connections span two) and the vanguard resolves every
+connection against that tag (`compressedIndexForInteriorLGR(lgr_tag, conn)`).
+Resolving per connection and dropping the two throws is a day's work on the
+simulation side. What does not follow is the ECL output: `WELSPECL`/`COMPDATL`
+and the per-LGR well arrays name one LGR per well, and the reference format
+has no representation for a well in two LGRs short of `AMALGAM`. The rings
+avoid the need: every perforation lies in the innermost ring by construction.
