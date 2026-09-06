@@ -137,5 +137,7 @@ LGRs short of `AMALGAM`.
 - Nested INIT/UNRST/NNC sections: fixed (D8), both rings loadable.
 - WELLREF at np=2: single ring and the nested ring pair both match serial
   (D9 fixed 2026-09-06: the host of a nested cell is its level-zero ancestor).
-- `COMPDATL` in a nested block fails at parse time (D10); the automatic
-  conversion is the way to complete a well in a nested ring.
+- `COMPDATL` in a nested block works (D10 was a deck mistake: a well
+  completed by `COMPDATL` cannot seed a `WELLREF` ring, since its cells are not
+  in the global grid; WELLREF now says so). Explicit nested CARFINs with
+  `COMPDATL` in the inner block agree with the automatic conversion.
