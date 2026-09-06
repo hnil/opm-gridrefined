@@ -101,7 +101,7 @@ branch (separate, not pushed in this round).
 | **`WELLREF` keyword: nested rings around wells** | ✓ | expanded to CARFIN blocks at parse time (opm-common `9c394618f`); COMPDAT wells moved into the rings by index with rescaled CF (`0047b10d4`), matching a hand-written COMPDATL to 7 digits; `WELL-ZONE-REFINEMENT.md` |
 | **A well completed in several LGRs** | ✓ solve | each connection resolves in its own LGR (`0cbe37b9a`); restart output still files the well under one section (D11) |
 | **Nested LGR INIT/UNRST/NNC sections** | ✓ | written in EGRID order with the child's own label (`bed1a8b0d`) |
-| **Nested LGR in parallel with host transmissibility** | ✗→err | refused; run serial or `--lgr-trans-from-host=false` (D9) |
+| **Nested LGR in parallel with host transmissibility** | ✓ | host = level-zero ancestor (D9 fixed 2026-09-06); nested deck and WELLREF ring pair agree serial vs np=2 |
 | Restart from an LGR run (parallel) | ✗→err | the reference grid holding the leaf ordering is on the I/O rank only; refused with a message |
 | Redistribution / rebalancing a distributed grid | ✗ | CpGrid-level gap; belongs to dynamic AMR (`REDISTRIBUTION-status.md`) |
 | Dynamic AMR | ◐ | `AdaptiveCpGrid` first cut (refine-after-construction, re-adaptable); no coarsening / cross-adapt data transfer / parallel adapt yet (`DESIGN-parallel-octree.md`) |

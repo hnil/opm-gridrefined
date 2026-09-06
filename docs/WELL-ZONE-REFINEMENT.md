@@ -135,8 +135,7 @@ LGRs short of `AMALGAM`.
 ### Status of the pieces (2026-09-05, evening)
 
 - Nested INIT/UNRST/NNC sections: fixed (D8), both rings loadable.
-- WELLREF at np=2: the single-ring case matches serial; the nested ring pair
-  is refused with the host-transmissibility default (D9) and runs with
-  `--lgr-trans-from-host=false`.
+- WELLREF at np=2: single ring and the nested ring pair both match serial
+  (D9 fixed 2026-09-06: the host of a nested cell is its level-zero ancestor).
 - `COMPDATL` in a nested block fails at parse time (D10); the automatic
   conversion is the way to complete a well in a nested ring.
