@@ -99,7 +99,7 @@ branch (separate, not pushed in this round).
 | **Parallel INIT transmissibilities** | ✓ | serial and np=2 INIT identical, LGR section included (opm-simulators `f881e132a`, 2026-09-05); was the father's value per refined cell |
 | **Deck NNC / aquifer / MULTREGT inside a box, parallel** | ✗→err | refused on every rank before load balancing (`0416df2d1`); used to hang at np>1 |
 | **`WELLREF` keyword: nested rings around wells** | ✓ | expanded to CARFIN blocks at parse time (opm-common `9c394618f`); COMPDAT wells moved into the rings by index with rescaled CF (`0047b10d4`), matching a hand-written COMPDATL to 7 digits; `WELL-ZONE-REFINEMENT.md` |
-| **A well completed in several LGRs** | ✓ solve | each connection resolves in its own LGR (`0cbe37b9a`); restart output still files the well under one section (D11) |
+| **A well completed in several LGRs** | ✓ | each connection resolves in its own LGR (`0cbe37b9a`); restart writes the well in every LGR section it has connections in, with that LGR's connections (D11 fixed 2026-09-14) |
 | **Nested LGR INIT/UNRST/NNC sections** | ✓ | written in EGRID order with the child's own label (`bed1a8b0d`) |
 | **Nested LGR in parallel with host transmissibility** | ✓ | host = level-zero ancestor (D9 fixed 2026-09-06); nested deck and WELLREF ring pair agree serial vs np=2 |
 | Restart from an LGR run (parallel) | ✗→err | the reference grid holding the leaf ordering is on the I/O rank only; refused with a message |

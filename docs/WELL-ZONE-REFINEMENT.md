@@ -127,10 +127,10 @@ PROD1 give `CARFIN 'WR1R1B1' 4 8 1 5 16 21 15 15 6` and
 Each connection now resolves in its own LGR (`CpGridVanguard::
 compressedIndexForConnection`; opm-simulators `0cbe37b9a`), and the two
 refusals in `Well::updateConnections` are gone. A well completed across two
-stacked boxes (`TEST_CARFIN_PROD1_SPLIT.DATA`) runs. What does not follow is
-the restart output: the writer files a well under its tag's section only
-(gap D11), and the reference format has no representation for a well in two
-LGRs short of `AMALGAM`.
+stacked boxes (`TEST_CARFIN_PROD1_SPLIT.DATA`) runs, and since 2026-09-14 the
+restart writes it in each box's section with that box's connections (D11).
+The reference format itself only reaches this through `AMALGAM`; readers that
+pair a well's sections by name will see one entry per box.
 
 ### Status of the pieces (2026-09-05, evening)
 
