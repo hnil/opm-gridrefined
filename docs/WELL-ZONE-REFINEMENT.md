@@ -128,9 +128,17 @@ Each connection now resolves in its own LGR (`CpGridVanguard::
 compressedIndexForConnection`; opm-simulators `0cbe37b9a`), and the two
 refusals in `Well::updateConnections` are gone. A well completed across two
 stacked boxes (`TEST_CARFIN_PROD1_SPLIT.DATA`) runs, and since 2026-09-14 the
-restart writes it in each box's section with that box's connections (D11).
-The reference format itself only reaches this through `AMALGAM`; readers that
-pair a well's sections by name will see one entry per box.
+restart writes it in each box's section with that box's connections (D11), each
+section counting only its own connections and the global section spanning the
+layers of all of them (2026-09-15). The reference format itself only reaches
+this through `AMALGAM`; readers that pair a well's sections by name will see one
+entry per box.
+
+One thing is still shared between the sections: the per-connection rates and
+cumulative totals in `XCON`. They are read from the summary state, whose
+connection key carries no LGR, and an LGR-local cell index repeats from box to
+box, so both sections of a split well show the same numbers (D12). `SCON` and
+the cell addresses in `ICON` are right; only `XCON`'s dynamic values are not.
 
 ### Status of the pieces (2026-09-05, evening)
 
