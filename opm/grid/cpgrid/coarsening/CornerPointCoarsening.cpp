@@ -528,6 +528,59 @@ void layout(const std::array<int,3>& dims, const Grouping& g,
 
 } // anonymous namespace
 
+BlockLayout blockLayout(const std::array<int,3>& fineDims,
+                        const std::vector<CoarsenRequest>& requests)
+{
+    checkRequests(fineDims, requests);
+
+    BlockLayout out;
+    out.blockOfCartesian.assign(static_cast<std::size_t>(fineDims[0])*fineDims[1]*fineDims[2], -1);
+
+    const auto addBlock = [&out, &fineDims](const std::array<int,6>& box) {
+        const int id = static_cast<int>(out.boxes.size());
+        out.boxes.push_back(box);
+        for (int k = box[2]; k <= box[5]; ++k) {
+            for (int j = box[1]; j <= box[4]; ++j) {
+                for (int i = box[0]; i <= box[3]; ++i) {
+                    out.blockOfCartesian[cellIndex(fineDims, i, j, k)] = id;
+                }
+            }
+        }
+    };
+
+    for (const auto& q : requests) {
+        std::array<std::vector<int>,3> starts;
+        for (int d = 0; d < 3; ++d) {
+            const auto sizes = evenSplit(q.endIJK[d] - q.startIJK[d], q.cellsPerDim[d]);
+            starts[d] = groupStarts(sizes);
+            for (auto& v : starts[d]) {
+                v += q.startIJK[d];
+            }
+        }
+        for (std::size_t kc = 0; kc + 1 < starts[2].size(); ++kc) {
+            for (std::size_t jc = 0; jc + 1 < starts[1].size(); ++jc) {
+                for (std::size_t ic = 0; ic + 1 < starts[0].size(); ++ic) {
+                    addBlock({starts[0][ic], starts[1][jc], starts[2][kc],
+                              starts[0][ic + 1] - 1, starts[1][jc + 1] - 1,
+                              starts[2][kc + 1] - 1});
+                }
+            }
+        }
+    }
+
+    // Everything the requests left alone is a block of one cell.
+    for (int k = 0; k < fineDims[2]; ++k) {
+        for (int j = 0; j < fineDims[1]; ++j) {
+            for (int i = 0; i < fineDims[0]; ++i) {
+                if (out.blockOfCartesian[cellIndex(fineDims, i, j, k)] < 0) {
+                    addBlock({i, j, k, i, j, k});
+                }
+            }
+        }
+    }
+    return out;
+}
+
 CartesianMap cartesianMap(const std::array<int,3>& fineDims,
                           const std::vector<CoarsenRequest>& requests)
 {

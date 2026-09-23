@@ -343,6 +343,21 @@ namespace Dune
                                   bool pinchActive,
                                   bool edge_conformal);
 
+        /// Build a grid whose cells are boxes of a corner-point description
+        /// merged into one. Faces inside a block are dropped and the rest are
+        /// kept as they are, so a coarse cell simply has several faces where
+        /// its neighbours are finer. This can coarsen part of a column, which
+        /// a coarsening written as COORD/ZCORN cannot: pillars run through
+        /// every layer.
+        ///
+        /// \param[in] blockOfCartesian Block of each Cartesian cell.
+        /// \param[in] blockBox Each block's box, {i1, j1, k1, i2, j2, k2}.
+        /// \param[in] edge_conformal Process the input edge-conformal.
+        void processEclipseFormatCoarsened(const grdecl& input_data,
+                                           const std::vector<int>& blockOfCartesian,
+                                           const std::vector<std::array<int,6>>& blockBox,
+                                           bool edge_conformal = false);
+
         //@}
 
         /// \name Cartesian grid extensions.
