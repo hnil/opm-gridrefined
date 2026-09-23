@@ -38,6 +38,7 @@
 #endif
 
 #include <opm/grid/cpgrid/CpGridData.hpp>
+#include <opm/grid/cpgrid/RetainedCornerPointInput.hpp>
 
 #include <opm/grid/common/GeometryHelpers.hpp>
 
@@ -352,10 +353,11 @@ namespace cpgrid
             ecl_state->prune_global_for_schedule_run();
         }
 
-        // When the deck requests LGRs, retain the (post-MINPV) corner-point
-        // description: the refinement builder resamples it, and the grid
-        // does not otherwise keep COORD/ZCORN (DESIGN-builder.md D4).
-        if (ecl_state && ecl_state->getLgrs().size() > 0) {
+        // Retain the (post-MINPV) corner-point description when the deck
+        // requests LGRs, for the refinement builder (DESIGN-builder.md D4), or
+        // when asked to, for a second grid on the same geometry.
+        const bool retainForLgr = ecl_state && ecl_state->getLgrs().size() > 0;
+        if (retainForLgr || Opm::RetainCornerPointInput::enabled()) {
             auto retained = std::make_shared<Opm::Refinement::RetainedCornerPointInput>();
             retained->dims = { static_cast<int>(ecl_grid.getNX()),
                                static_cast<int>(ecl_grid.getNY()),
@@ -366,7 +368,12 @@ namespace cpgrid
             retained->edgeConformal = edge_conformal;
             retained->pinchNnc = nnc_cells[PinchNNC];
             retained->pinchActive = pinchActive;
-            this->retained_cp_input_ = std::move(retained);
+            if (Opm::RetainCornerPointInput::enabled()) {
+                Opm::RetainCornerPointInput::store(retained);
+            }
+            if (retainForLgr) {
+                this->retained_cp_input_ = std::move(retained);
+            }
         }
 
         // this variable is only required because getCellZvals() needs
