@@ -206,6 +206,7 @@ list(APPEND PUBLIC_HEADER_FILES
   opm/grid/cpgrid/DefaultGeometryPolicy.hpp
   opm/grid/cpgrid/Entity.hpp
   opm/grid/cpgrid/Entity2IndexDataHandle.hpp
+  opm/grid/cpgrid/RetainedCornerPointInput.hpp
   opm/grid/cpgrid/EntityRep.hpp
   opm/grid/cpgrid/Geometry.hpp
   opm/grid/cpgrid/GlobalIdMapping.hpp
