@@ -319,6 +319,28 @@ public:
                               double tolerance_unique_points,
                               bool edge_conformal);
 
+    /// Build a grid whose cells are boxes of another corner-point
+    /// description merged into one.
+    ///
+    /// The faces inside a block are dropped and the rest are kept exactly as
+    /// they are, so the result is conforming and edge-conformal wherever the
+    /// input was: where a coarse cell meets finer neighbours its face is
+    /// simply several faces. Unlike a coarsening written as COORD/ZCORN, this
+    /// can coarsen part of a column - lateral coarsening of an overburden
+    /// above a laterally fine reservoir, say - because pillars do not
+    /// constrain it.
+    ///
+    /// \param[in] input_data The description to coarsen.
+    /// \param[in] blockOfCartesian Block of each Cartesian cell, -1 for none.
+    /// \param[in] blockBox Per block, its Cartesian box as
+    ///            {i1, j1, k1, i2, j2, k2}, inclusive. Blocks must be boxes:
+    ///            a cell keeps eight corners.
+    /// \param[in] edge_conformal Process the input edge-conformal.
+    void processEclipseFormatCoarsened(const grdecl& input_data,
+                                       const std::vector<int>& blockOfCartesian,
+                                       const std::vector<std::array<int,6>>& blockBox,
+                                       bool edge_conformal);
+
     /// @brief
     ///    Extract Cartesian index triplet (i,j,k) of an active cell.
     ///

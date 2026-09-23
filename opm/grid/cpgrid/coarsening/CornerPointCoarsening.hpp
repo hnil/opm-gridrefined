@@ -86,6 +86,21 @@ struct CartesianMap
 CartesianMap cartesianMap(const std::array<int,3>& fineDims,
                           const std::vector<CoarsenRequest>& requests);
 
+/// The blocks the requests define, without asking whether they can be written
+/// as a corner-point description: what the topological merge needs.
+struct BlockLayout
+{
+    /// Block of each fine Cartesian cell.
+    std::vector<int> blockOfCartesian;
+    /// Each block's box as {i1, j1, k1, i2, j2, k2}, inclusive.
+    std::vector<std::array<int,6>> boxes;
+};
+
+/// Split the requested boxes into blocks. Every cell belongs to exactly one:
+/// cells no request covers are blocks of their own.
+BlockLayout blockLayout(const std::array<int,3>& fineDims,
+                        const std::vector<CoarsenRequest>& requests);
+
 /// One coarse cell and the fine box it covers (half-open, fine indices).
 struct Block
 {
