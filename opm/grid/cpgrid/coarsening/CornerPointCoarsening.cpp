@@ -226,13 +226,13 @@ std::vector<int> requestsAlong(int n, int axis, const std::array<int,3>& other,
     return of;
 }
 
-void checkRequests(const Grdecl& fine, const std::vector<CoarsenRequest>& requests)
+void checkRequests(const std::array<int,3>& dims, const std::vector<CoarsenRequest>& requests)
 {
-    std::vector<int> owner(static_cast<std::size_t>(fine.dims[0])*fine.dims[1]*fine.dims[2], -1);
+    std::vector<int> owner(static_cast<std::size_t>(dims[0])*dims[1]*dims[2], -1);
     for (std::size_t r = 0; r < requests.size(); ++r) {
         const auto& q = requests[r];
         for (int d = 0; d < 3; ++d) {
-            if (q.startIJK[d] < 0 || q.endIJK[d] > fine.dims[d] || q.startIJK[d] >= q.endIJK[d]) {
+            if (q.startIJK[d] < 0 || q.endIJK[d] > dims[d] || q.startIJK[d] >= q.endIJK[d]) {
                 fail("request " + std::to_string(r + 1) + " is outside the grid");
             }
             const int len = q.endIJK[d] - q.startIJK[d];
@@ -245,7 +245,7 @@ void checkRequests(const Grdecl& fine, const std::vector<CoarsenRequest>& reques
         for (int k = q.startIJK[2]; k < q.endIJK[2]; ++k) {
             for (int j = q.startIJK[1]; j < q.endIJK[1]; ++j) {
                 for (int i = q.startIJK[0]; i < q.endIJK[0]; ++i) {
-                    int& o = owner[cellIndex(fine.dims, i, j, k)];
+                    int& o = owner[cellIndex(dims, i, j, k)];
                     if (o >= 0) {
                         fail("requests " + std::to_string(o + 1) + " and "
                              + std::to_string(r + 1) + " overlap at " + ijk(i, j, k));
@@ -259,9 +259,9 @@ void checkRequests(const Grdecl& fine, const std::vector<CoarsenRequest>& reques
 
 /// Lateral grouping must be the same in every column: a dropped pillar line is
 /// dropped over the whole grid, which is what keeps the result a grdecl.
-Grouping buildGrouping(const Grdecl& fine, const std::vector<CoarsenRequest>& requests)
+Grouping buildGrouping(const std::array<int,3>& dims, const std::vector<CoarsenRequest>& requests)
 {
-    const auto& d = fine.dims;
+    const auto& d = dims;
     Grouping g;
 
     for (int axis = 0; axis < 2; ++axis) {
@@ -483,7 +483,62 @@ void checkColumnGrading(const Grouping& g, const Options& options, Report& repor
     }
 }
 
+/// Coarse dimensions, the blocks and the fine -> coarse map. No geometry.
+void layout(const std::array<int,3>& dims, const Grouping& g,
+            std::array<int,3>& coarseDims, std::vector<Block>& blocks,
+            std::vector<int>& fineToCoarse)
+{
+    std::size_t maxGroups = 0;
+    for (const auto& ks : g.kSizes) {
+        maxGroups = std::max(maxGroups, ks.size());
+    }
+    coarseDims = {g.ncx(), g.ncy(), static_cast<int>(maxGroups)};
+
+    const auto iStart = groupStarts(g.iSizes);
+    const auto jStart = groupStarts(g.jSizes);
+    blocks.assign(static_cast<std::size_t>(coarseDims[0])*coarseDims[1]*coarseDims[2], Block{});
+    fineToCoarse.assign(static_cast<std::size_t>(dims[0])*dims[1]*dims[2], -1);
+
+    for (int jc = 0; jc < coarseDims[1]; ++jc) {
+        for (int ic = 0; ic < coarseDims[0]; ++ic) {
+            const auto& kSizes = g.kSizes[static_cast<std::size_t>(jc)*coarseDims[0] + ic];
+            const auto kStart = groupStarts(kSizes);
+            for (int kc = 0; kc < coarseDims[2]; ++kc) {
+                const std::size_t coarse = cellIndex(coarseDims, ic, jc, kc);
+                auto& block = blocks[coarse];
+                block.coarseIndex = static_cast<int>(coarse);
+                if (static_cast<std::size_t>(kc) >= kSizes.size()) {
+                    // Column with fewer groups: a collapsed cell at its base.
+                    block.startIJK = block.endIJK = {iStart[ic], jStart[jc], dims[2] - 1};
+                    continue;
+                }
+                block.startIJK = {iStart[ic], jStart[jc], kStart[kc]};
+                block.endIJK = {iStart[ic + 1], jStart[jc + 1], kStart[kc + 1]};
+                for (int k = block.startIJK[2]; k < block.endIJK[2]; ++k) {
+                    for (int j = block.startIJK[1]; j < block.endIJK[1]; ++j) {
+                        for (int i = block.startIJK[0]; i < block.endIJK[0]; ++i) {
+                            fineToCoarse[cellIndex(dims, i, j, k)] = static_cast<int>(coarse);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 } // anonymous namespace
+
+CartesianMap cartesianMap(const std::array<int,3>& fineDims,
+                          const std::vector<CoarsenRequest>& requests)
+{
+    checkRequests(fineDims, requests);
+    const Grouping g = buildGrouping(fineDims, requests);
+
+    CartesianMap out;
+    std::vector<Block> blocks;
+    layout(fineDims, g, out.coarseDims, blocks, out.fineToCoarse);
+    return out;
+}
 
 Result coarsenCornerPoint(const Grdecl& fine,
                           const std::vector<CoarsenRequest>& requests,
@@ -497,8 +552,8 @@ Result coarsenCornerPoint(const Grdecl& fine,
         fail("input arrays do not match the given dimensions");
     }
 
-    checkRequests(fine, requests);
-    const Grouping g = buildGrouping(fine, requests);
+    checkRequests(d, requests);
+    const Grouping g = buildGrouping(d, requests);
 
     Result result;
     checkLateralContinuity(fine, g);
@@ -507,14 +562,10 @@ Result coarsenCornerPoint(const Grdecl& fine,
 
     const auto iStart = groupStarts(g.iSizes);
     const auto jStart = groupStarts(g.jSizes);
-    std::size_t maxGroups = 0;
-    for (const auto& ks : g.kSizes) {
-        maxGroups = std::max(maxGroups, ks.size());
-    }
 
     auto& out = result.grid;
-    out.dims = {g.ncx(), g.ncy(), static_cast<int>(maxGroups)};
-    const std::size_t nCoarse = static_cast<std::size_t>(out.dims[0])*out.dims[1]*out.dims[2];
+    layout(d, g, out.dims, result.blocks, result.fineToCoarse);
+    const std::size_t nCoarse = result.blocks.size();
 
     out.coord.resize(6*static_cast<std::size_t>(out.dims[0] + 1)*(out.dims[1] + 1));
     for (int Jc = 0; Jc <= out.dims[1]; ++Jc) {
@@ -527,21 +578,17 @@ Result coarsenCornerPoint(const Grdecl& fine,
 
     out.zcorn.assign(8*nCoarse, 0.0);
     out.actnum.assign(nCoarse, 0);
-    result.blocks.assign(nCoarse, Block{});
-    result.fineToCoarse.assign(nCells, -1);
 
-    for (int jc = 0; jc < out.dims[1]; ++jc) {
-        for (int ic = 0; ic < out.dims[0]; ++ic) {
-            const auto& kSizes = g.kSizes[static_cast<std::size_t>(jc)*out.dims[0] + ic];
-            const auto kStart = groupStarts(kSizes);
-            const int i1 = iStart[ic], i2 = iStart[ic + 1] - 1;
-            const int j1 = jStart[jc], j2 = jStart[jc + 1] - 1;
-
-            for (int kc = 0; kc < out.dims[2]; ++kc) {
-                const bool padding = static_cast<std::size_t>(kc) >= kSizes.size();
-                const int k1 = padding ? d[2] - 1 : kStart[kc];
-                const int k2 = padding ? d[2] - 1 : kStart[kc + 1] - 1;
+    for (int kc = 0; kc < out.dims[2]; ++kc) {
+        for (int jc = 0; jc < out.dims[1]; ++jc) {
+            for (int ic = 0; ic < out.dims[0]; ++ic) {
                 const std::size_t coarse = cellIndex(out.dims, ic, jc, kc);
+                const auto& block = result.blocks[coarse];
+                const bool padding = block.endIJK[2] == block.startIJK[2];
+                const int i1 = block.startIJK[0], i2 = block.endIJK[0] - 1;
+                const int j1 = block.startIJK[1], j2 = block.endIJK[1] - 1;
+                const int k1 = block.startIJK[2];
+                const int k2 = padding ? k1 : block.endIJK[2] - 1;
 
                 for (int dk = 0; dk < 2; ++dk) {
                     // A padded cell is collapsed onto the column's base.
@@ -550,15 +597,12 @@ Result coarsenCornerPoint(const Grdecl& fine,
                     for (int dj = 0; dj < 2; ++dj) {
                         for (int di = 0; di < 2; ++di) {
                             out.zcorn[cornerIndex(out.dims, 2*ic + di, 2*jc + dj, 2*kc + dk)]
-                                = cellZ(fine, di ? i2 : i1, dj ? j2 : j1, kSrc, di, dj, dkSrc);
+                                = cellZ(fine, di ? std::max(i1, i2) : i1,
+                                        dj ? std::max(j1, j2) : j1, kSrc, di, dj, dkSrc);
                         }
                     }
                 }
-
-                result.blocks[coarse] = Block{{i1, j1, k1}, {i2 + 1, j2 + 1, k2 + 1},
-                                              static_cast<int>(coarse)};
                 if (padding) {
-                    result.blocks[coarse].endIJK = result.blocks[coarse].startIJK;
                     continue;
                 }
 
@@ -569,7 +613,6 @@ Result coarsenCornerPoint(const Grdecl& fine,
                     for (int j = j1; j <= j2; ++j) {
                         for (int i = i1; i <= i2; ++i) {
                             const std::size_t f = cellIndex(d, i, j, k);
-                            result.fineToCoarse[f] = static_cast<int>(coarse);
                             const bool active = fine.actnum.empty() || fine.actnum[f] != 0;
                             anyActive = anyActive || active;
                             allActive = allActive && active;

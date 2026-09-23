@@ -71,6 +71,21 @@ struct Options
     bool requireGradedColumns{true};
 };
 
+/// The index side of a coarsening: no geometry, so it can be computed wherever
+/// only the dimensions are at hand (a load balancer, for instance).
+struct CartesianMap
+{
+    std::array<int,3> coarseDims{};
+    /// Fine Cartesian index -> coarse Cartesian index.
+    std::vector<int> fineToCoarse;
+};
+
+/// The coarse dimensions and the fine -> coarse Cartesian map the requests
+/// imply. Validates the requests as coarsenCornerPoint() does, apart from the
+/// checks that need geometry.
+CartesianMap cartesianMap(const std::array<int,3>& fineDims,
+                          const std::vector<CoarsenRequest>& requests);
+
 /// One coarse cell and the fine box it covers (half-open, fine indices).
 struct Block
 {
