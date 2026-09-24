@@ -660,7 +660,7 @@ namespace {
         using namespace Opm;
         return Dune::cpgrid::OpmWellType(name,name,0,0,0,0,0.,WellType(),
                    Well::ProducerCMode(),Connection::Order(),UnitSystem(),
-                   0.,0.,false,false,0,Well::GasInflowEquation());
+                   0.,false,false,0,Well::GasInflowEquation());
     };
 } // end anonymous namespace
 #endif

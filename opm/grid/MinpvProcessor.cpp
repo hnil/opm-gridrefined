@@ -57,6 +57,13 @@ double MinpvProcessor::computeGap(const std::array<double,8>& coord_above,
     return min_val;
 }
 
+/// \brief Whether top and bottom plane coincide
+bool isCollapsed(const std::array<double,8>& coord)
+{
+    return coord[0] == coord[4] && coord[1] == coord[5] &&
+        coord[2] == coord[6] && coord[3] == coord[7];
+}
+
 MinpvProcessor::Result
 MinpvProcessor::process(const std::vector<double>& thickness,
                         const double z_tolerance,
@@ -228,8 +235,24 @@ MinpvProcessor::process(const std::vector<double>& thickness,
                         low_pv_active = pv[c_below] < minpvv[c_below] && active;
                     }
 
+                    // The column ran off the grid bottom: the loop above left the last
+                    // cell via the kk_iter == dims_[2] break, and that break only exits
+                    // the inner while, not this column's for-loop.  There is no cell
+                    // below to receive the void or to connect by an NNC, and c_below
+                    // is stale, so neither branch can proceed.  Without this guard the
+                    // merge branch reads and writes 8 doubles past the end of zcorn.
+                    if (kk_iter == dims_[2]) {
+                        break;
+                    }
+
                     // create nnc if false or merge the cells if true
                     if (mergeMinPVCells && c_low_pv_active) {
+                        // Bottom cell inactive: leave the geometry untouched, no merge.
+                        if (!actnum.empty() && !actnum[c_below]) {
+                            kk = kk_iter;
+                            continue;
+                        }
+
                         // Set lower k coordinates of cell below to upper cells's coordinates.
                         // i.e fill the void using the cell below
                         std::array<double, 8> cz_below = getCellZcorn(ii, jj, kk_iter, zcorn);
@@ -242,8 +265,9 @@ MinpvProcessor::process(const std::vector<double>& thickness,
                     else
                     {
 
-                        // No top or bottom cell, so no nnc is created.
-                        if (kk == 0 || kk_iter == dims_[2]) {
+                        // No top cell, so no nnc is created.  (The no-bottom-cell case,
+                        // kk_iter == dims_[2], is handled by the guard above.)
+                        if (kk == 0) {
                             kk = kk_iter;
                             continue;
                         }
@@ -293,8 +317,11 @@ MinpvProcessor::process(const std::vector<double>& thickness,
                         option4ALLZero = option4ALLZero || (!permz.empty() && permz[c_above] == 0.0) || multz(c_above) == 0.0;
                         nnc_allowed = nnc_allowed && (computeGap(cz_above, cz_below) < max_gap) && (!pinchOption4ALL || !option4ALLZero) ;
 
+                        // Note that collapsed cells become inactive in preprocess.c
+                        // We treat them as a barrier preventing NNCs here.
                         if ( nnc_allowed &&
                              (actnum.empty() || (actnum[c_above] && actnum[c_below])) &&
+                             !isCollapsed(cz_below) && !isCollapsed(cz_above) &&
                              pv[c_above] > minpvv[c_above] && pv[c_below] > minpvv[c_below]) {
                             result.add_nnc(c_above, c_below);
                         }
@@ -323,7 +350,10 @@ MinpvProcessor::process(const std::vector<double>& thickness,
                                     <= tolerance_unique_points;
                             }
 
-                            if (!vertically_connected && computeGap(cz, cz_below) < max_gap) {
+                            // Note that collapsed cells become inactive in preprocess.c
+                            // We treat them as a barrier preventing NNCs here.
+                            if (!vertically_connected && computeGap(cz, cz_below) < max_gap &&
+                                !isCollapsed(cz) && !isCollapsed(cz_below) ) {
                                 result.add_nnc(c, c_below);
                             }
                         }

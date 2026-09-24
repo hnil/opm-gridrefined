@@ -115,13 +115,27 @@ void WellConnections::init([[maybe_unused]] const std::vector<OpmWellType>& well
 #if HAVE_OPM_COMMON
     well_indices_.resize(wells.size());
 
+    // Both loops below index cartesian_to_compressed with a position derived
+    // from the connection, and neither checked that the position is actually
+    // inside the map.  Bound the lookup against the container that is being
+    // indexed, so that a position which is not a level-zero Cartesian index
+    // cannot read past the end of it.
+    const auto lookup = [&cartesian_to_compressed](const int cart_grid_idx)
+    {
+        if ((cart_grid_idx < 0) ||
+            (static_cast<std::size_t>(cart_grid_idx) >= cartesian_to_compressed.size()))
+        {
+            return -1;
+        }
+
+        return cartesian_to_compressed[cart_grid_idx];
+    };
+
     // We assume that we know all the wells.
     int index=0;
     for (const auto& well : wells) {
         std::set<int>& well_indices = well_indices_[index];
         const auto& connectionSet = well.getConnections( );
-        const std::size_t cartSize =
-            static_cast<std::size_t>(cartesianSize[0]) * cartesianSize[1] * cartesianSize[2];
         for (size_t c=0; c<connectionSet.size(); c++) {
             const auto& connection = connectionSet.get(c);
             // Connections completed inside a local grid refinement (COMPDATL,
@@ -137,10 +151,7 @@ void WellConnections::init([[maybe_unused]] const std::vector<OpmWellType>& well
             int j = connection.getJ();
             int k = connection.getK();
             int cart_grid_idx = i + cartesianSize[0]*(j + cartesianSize[1]*k);
-            if (cart_grid_idx < 0 || static_cast<std::size_t>(cart_grid_idx) >= cartSize) {
-                continue; // out of the level-zero Cartesian range
-            }
-            int compressed_idx = cartesian_to_compressed[cart_grid_idx];
+            int compressed_idx = lookup(cart_grid_idx);
             if ( compressed_idx >= 0 ) // Ignore connections in inactive cells.
             {
                 well_indices.insert(compressed_idx);
@@ -149,10 +160,7 @@ void WellConnections::init([[maybe_unused]] const std::vector<OpmWellType>& well
         const auto possibleFutureConnectionSetIt = possibleFutureConnections.find(well.name());
         if (possibleFutureConnectionSetIt != possibleFutureConnections.end()) {
             for (auto& cart_grid_idx : possibleFutureConnectionSetIt->second) {
-                if (cart_grid_idx < 0 || static_cast<std::size_t>(cart_grid_idx) >= cartSize) {
-                    continue; // out of the level-zero Cartesian range (e.g. LGR cell)
-                }
-                int compressed_idx = cartesian_to_compressed[cart_grid_idx];
+                int compressed_idx = lookup(cart_grid_idx);
                 if ( compressed_idx >= 0 ) // Ignore connections in inactive cells.
                 {
                     well_indices.insert(compressed_idx);
