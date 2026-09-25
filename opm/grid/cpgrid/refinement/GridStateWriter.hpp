@@ -113,6 +113,13 @@ struct GridStateWriter
     /// their parent) on a distributed grid.
     static const std::vector<char>& cellPartitionTypes(const Data& grid);
     static void setCellPartitionTypes(Data& grid, std::vector<char> types);
+
+    /// Global ids of a distributed grid's cells, faces and points, by local
+    /// index; replaces ids derived from local numbering.
+    static void setGlobalIdMapping(Data& grid,
+                                   std::vector<int> cellIds,
+                                   std::vector<int> faceIds,
+                                   std::vector<int> pointIds);
 };
 
 } // namespace Refinement

@@ -83,6 +83,14 @@ void GridStateWriter::setGlobalCell(Data& grid, std::vector<int> globalCell)
     grid.global_cell_ = std::move(globalCell);
 }
 
+void GridStateWriter::setGlobalIdMapping(Data& grid,
+                                         std::vector<int> cellIds,
+                                         std::vector<int> faceIds,
+                                         std::vector<int> pointIds)
+{
+    grid.global_id_set_->swap(cellIds, faceIds, pointIds);
+}
+
 void GridStateWriter::setIndexSet(Data& grid, std::size_t numCells, std::size_t numPoints)
 {
     grid.index_set_ = std::make_unique<Dune::cpgrid::IndexSet>(numCells, numPoints);
