@@ -29,14 +29,14 @@
 
 #include <opm/grid/CpGrid.hpp>
 
-#if HAVE_ECL_INPUT
+#if HAVE_OPM_COMMON
 #include <opm/input/eclipse/EclipseState/Grid/EclipseGrid.hpp>
 #endif
 
 #include <array>
 #include <vector>
 
-#if HAVE_ECL_INPUT
+#if HAVE_OPM_COMMON
 
 namespace
 {
@@ -210,7 +210,7 @@ BOOST_AUTO_TEST_CASE(FaultedGridVerticesReached)
                         " interface)");
 }
 
-#endif // HAVE_ECL_INPUT
+#endif // HAVE_OPM_COMMON
 
 bool
 init_unit_test_func()
