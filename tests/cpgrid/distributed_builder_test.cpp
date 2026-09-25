@@ -35,6 +35,9 @@
 #include <dune/common/parallel/mpihelper.hh>
 
 #include <array>
+#include <iostream>
+#include <cmath>
+#include <map>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -154,6 +157,90 @@ BOOST_AUTO_TEST_CASE(rankInteriorBoxRefinedInParallel)
     BOOST_CHECK_EQUAL(grid.comm().sum(refined > 0 ? 1 : 0), 1);
     BOOST_CHECK_EQUAL(grid.comm().sum(refined), 18*8);
     BOOST_CHECK_CLOSE(grid.comm().sum(interiorVolume), 12.0*12.0*4.0, 1e-8);
+}
+
+// Mechanics assembles on vertices, so leaf vertices need what flow never asks
+// for: one global id per vertex on every rank, and exactly one owner.
+BOOST_AUTO_TEST_CASE(rankInteriorLeafVerticesConsistent)
+{
+    const std::array<int,3> dims = {{12, 12, 4}};
+    auto g = makeUnitGrid(dims);
+
+    Dune::CpGrid grid;
+    grid.createCartesian(dims, {{1.0, 1.0, 1.0}});
+    if (grid.comm().size() < 2) {
+        return;
+    }
+    std::vector<int> parts(static_cast<std::size_t>(dims[0])*dims[1]*dims[2]);
+    const int np = grid.comm().size();
+    for (int k = 0; k < dims[2]; ++k) {
+        for (int j = 0; j < dims[1]; ++j) {
+            for (int i = 0; i < dims[0]; ++i) {
+                parts[i + dims[0]*j + dims[0]*dims[1]*k] = (i < 8) ? 0 : (1 + ((i - 8) % (np - 1)));
+            }
+        }
+    }
+    grid.loadBalance(parts, false, true, 2);
+    BuilderGuard guard(std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+        g.dims, g.coord, g.zcorn, g.actnum));
+    grid.addLgrsUpdateLeafView({{2,2,2}}, {{2,2,1}}, {{5,5,3}}, {"LGR1"});
+
+    // id, x, y, z, partition type, rank
+    std::vector<double> mine;
+    const auto& gv = grid.leafGridView();
+    const auto& ids = grid.globalIdSet();
+    for (const auto& v : Dune::vertices(gv)) {
+        const auto x = v.geometry().center();
+        mine.insert(mine.end(), {static_cast<double>(ids.id(v)), x[0], x[1], x[2],
+                                 static_cast<double>(v.partitionType()),
+                                 static_cast<double>(grid.comm().rank())});
+    }
+    const int n = static_cast<int>(mine.size());
+    std::vector<int> counts(np);
+    grid.comm().allgather(&n, 1, counts.data());
+    std::vector<int> displ(np + 1, 0);
+    for (int r = 0; r < np; ++r) {
+        displ[r + 1] = displ[r] + counts[r];
+    }
+    std::vector<double> all(displ[np]);
+    grid.comm().allgatherv(mine.data(), n, all.data(), counts.data(), displ.data());
+
+    std::map<long, std::array<double,3>> posOfId;
+    std::map<std::array<long,3>, long> idOfPos;
+    std::map<long, std::array<int,2>> owners; // interior count, border count
+    int idClash = 0, posClash = 0;
+    for (std::size_t e = 0; e < all.size(); e += 6) {
+        const long id = static_cast<long>(all[e]);
+        const std::array<double,3> x {all[e+1], all[e+2], all[e+3]};
+        const std::array<long,3> key {std::lround(x[0]*1e6), std::lround(x[1]*1e6), std::lround(x[2]*1e6)};
+        const auto [it, fresh] = posOfId.emplace(id, x);
+        if (!fresh && (std::abs(it->second[0]-x[0]) + std::abs(it->second[1]-x[1])
+                       + std::abs(it->second[2]-x[2])) > 1e-9) {
+            ++idClash;
+        }
+        const auto [pit, pfresh] = idOfPos.emplace(key, id);
+        if (!pfresh && pit->second != id) {
+            ++posClash;
+        }
+        const auto type = static_cast<Dune::PartitionType>(static_cast<int>(all[e+4]));
+        auto& o = owners[id];
+        o[0] += (type == Dune::InteriorEntity);
+        o[1] += (type == Dune::BorderEntity);
+    }
+    int badOwner = 0;
+    for (const auto& [id, o] : owners) {
+        const bool ok = (o[0] == 1 && o[1] == 0) || (o[0] == 0 && o[1] >= 1);
+        badOwner += !ok;
+    }
+    if (grid.comm().rank() == 0) {
+        std::cout << "leaf vertices: " << owners.size() << " ids, " << idOfPos.size()
+                  << " positions; one id at two positions " << idClash
+                  << ", one position under two ids " << posClash
+                  << ", ids without a single owner " << badOwner << std::endl;
+    }
+    BOOST_CHECK_EQUAL(idClash, 0);
+    BOOST_CHECK_EQUAL(posClash, 0);
+    BOOST_CHECK_EQUAL(badOwner, 0);
 }
 
 BOOST_AUTO_TEST_CASE(boxTouchingOverlapThrows)

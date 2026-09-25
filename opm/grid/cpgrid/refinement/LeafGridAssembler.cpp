@@ -127,6 +127,70 @@ int cornerSlotMask(CpGridData& grid)
     return mask;
 }
 
+#if HAVE_MPI
+// On a distributed leaf, ids through the local id set follow local numbering
+// and differ between ranks. Coarse entities keep level zero's global ids (leaf
+// corners and level-zero faces keep their level-zero index); refined ones are
+// rank-interior and get per-rank ranges above every id in use.
+void setDistributedLeafIds(CpGridData& leaf, const CpGridData& level0,
+                           std::vector<int> cellIds,
+                           const std::vector<SourceRef>& leafFaces,
+                           int numLeafFaces, int numLeafCorners,
+                           const Dune::Communication<Dune::MPIHelper::MPICommunicator>& cc)
+{
+    const auto& ids0 = level0.globalIdSet();
+    const auto& faceIds0 = ids0.template getMapping<1>();
+    const auto& pointIds0 = ids0.template getMapping<3>();
+    const int numCorners0 = level0.size(3);
+
+    int maxUsed = 0;
+    for (const std::vector<int>* ids : {&ids0.template getMapping<0>(), &faceIds0, &pointIds0,
+                                        static_cast<const std::vector<int>*>(&cellIds)}) {
+        for (const int id : *ids) {
+            maxUsed = std::max(maxUsed, id);
+        }
+    }
+    maxUsed = cc.max(maxUsed);
+
+    std::vector<int> faceIds(numLeafFaces, -1);
+    std::vector<int> pointIds(numLeafCorners, -1);
+    int numNew = 0;
+    for (int f = 0; f < numLeafFaces; ++f) {
+        const bool coarse = f < static_cast<int>(leafFaces.size()) && leafFaces[f].grid == 0;
+        if (coarse) {
+            faceIds[f] = faceIds0[leafFaces[f].index];
+        } else {
+            ++numNew;
+        }
+    }
+    for (int p = 0; p < numLeafCorners; ++p) {
+        if (p < numCorners0) {
+            pointIds[p] = pointIds0[p];
+        } else {
+            ++numNew;
+        }
+    }
+    std::vector<int> counts(cc.size(), 0);
+    cc.allgather(&numNew, 1, counts.data());
+    int next = maxUsed + 1;
+    for (int r = 0; r < cc.rank(); ++r) {
+        next += counts[r];
+    }
+    for (auto& id : faceIds) {
+        if (id < 0) {
+            id = next++;
+        }
+    }
+    for (auto& id : pointIds) {
+        if (id < 0) {
+            id = next++;
+        }
+    }
+    GridStateWriter::setGlobalIdMapping(leaf, std::move(cellIds), std::move(faceIds),
+                                        std::move(pointIds));
+}
+#endif
+
 int axisOf(face_tag tag)
 {
     switch (tag) {
@@ -1214,6 +1278,8 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         leaf->computeCellPartitionType();
         leaf->computePointPartitionType();
         leaf->computeCommunicationInterfaces(numLeafCorners);
+        setDistributedLeafIds(*leaf, level0, leafCellGlobalId, leafFaces, numLeafFaces,
+                              numLeafCorners, cc);
     }
 #endif
 
@@ -1788,6 +1854,8 @@ assembleNestedLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         leaf->computeCellPartitionType();
         leaf->computePointPartitionType();
         leaf->computeCommunicationInterfaces(numLeafCorners);
+        setDistributedLeafIds(*leaf, level0, leafCellGlobalId, leafFaces, numLeafFaces,
+                              numLeafCorners, cc);
     }
 #endif
 
