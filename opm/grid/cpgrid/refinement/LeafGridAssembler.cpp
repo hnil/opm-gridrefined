@@ -50,6 +50,25 @@ using Dune::cpgrid::EntityRep;
 using Opm::Refinement::BlockRefinement;
 using Opm::Refinement::GridStateWriter;
 
+// Numerical aquifer cells are never refined (refused in a box): each is a
+// level-zero cell of the leaf.
+std::vector<int> leafAquiferCells(const CpGridData& level0,
+                                  const std::vector<std::array<int,2>>& leafToLevel)
+{
+    const auto& aquifer0 = level0.sortedNumAquiferCells();
+    std::vector<int> leaf;
+    if (aquifer0.empty()) {
+        return leaf;
+    }
+    for (int cell = 0; cell < static_cast<int>(leafToLevel.size()); ++cell) {
+        if ((leafToLevel[cell][0] == 0) &&
+            std::binary_search(aquifer0.begin(), aquifer0.end(), leafToLevel[cell][1])) {
+            leaf.push_back(cell);
+        }
+    }
+    return leaf;
+}
+
 struct SourceRef
 {
     int grid;  // 0 = level zero, b+1 = level grid of box b
@@ -1203,6 +1222,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     GridStateWriter::setGlobalCell(*leaf, std::move(leafGlobalCell));
     GridStateWriter::setIndexSet(*leaf, numLeafCells, numLeafCorners);
     GridStateWriter::setParentRelations(*leaf, std::move(leafChildToParent), std::move(leafIdxInParent));
+    GridStateWriter::setAquiferCells(*leaf, leafAquiferCells(level0, leafToLevel));
     GridStateWriter::setLeafToLevel(*leaf, std::move(leafToLevel));
     GridStateWriter::setCornerHistory(*leaf, std::move(leafCornerHistory));
     GridStateWriter::setRefinementMaxLevel(*leaf, numBoxes);
@@ -1776,6 +1796,7 @@ assembleNestedLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     GridStateWriter::setGlobalCell(*leaf, std::move(leafGlobalCell));
     GridStateWriter::setIndexSet(*leaf, numLeafCells, numLeafCorners);
     GridStateWriter::setParentRelations(*leaf, std::move(leafChildToParent), std::move(leafIdxInParent));
+    GridStateWriter::setAquiferCells(*leaf, leafAquiferCells(level0, leafToLevel));
     GridStateWriter::setLeafToLevel(*leaf, std::move(leafToLevel));
     GridStateWriter::setCornerHistory(*leaf, std::move(leafCornerHistory));
     GridStateWriter::setRefinementMaxLevel(*leaf, numBoxes);
