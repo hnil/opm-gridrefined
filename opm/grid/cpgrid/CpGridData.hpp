@@ -336,10 +336,13 @@ public:
     ///            {i1, j1, k1, i2, j2, k2}, inclusive. Blocks must be boxes:
     ///            a cell keeps eight corners.
     /// \param[in] edge_conformal Process the input edge-conformal.
+    /// \param[in] collapse_coarse_faces Make the faces between two coarse cells
+    ///            one face each, as an LGR of the coarse grid would have them.
     void processEclipseFormatCoarsened(const grdecl& input_data,
                                        const std::vector<int>& blockOfCartesian,
                                        const std::vector<std::array<int,6>>& blockBox,
-                                       bool edge_conformal);
+                                       bool edge_conformal,
+                                       bool collapse_coarse_faces = false);
 
     /// @brief
     ///    Extract Cartesian index triplet (i,j,k) of an active cell.
