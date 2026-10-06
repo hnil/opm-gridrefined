@@ -1,11 +1,11 @@
 # LGR-Gaps-Rev0 (upstream master 2026-09-28) against our LGR branches
 
 State of the code on `lgr-status` (2026-10-06, late): opm-common `276717b87`,
-opm-gridrefined `9cfc7d04`, opm-simulators `938cad6fe`; decks on opm-tests `new_lgr`.
+opm-gridrefined `522dcc8a`, opm-simulators `d7e39e32b`; decks on opm-tests `new_lgr`.
 Each row of the sheet is judged against our code, not upstream's.
 
 S = solved, P = partial, O = open, NA = does not apply to our design.
-Tally of the 41 rows: **20 S, 13 P, 7 O, 1 NA** (morning of 2026-10-06: 13 S, 17 P, 10 O).
+Tally of the 41 rows: **23 S, 12 P, 5 O, 1 NA** (morning of 2026-10-06: 13 S, 17 P, 10 O).
 
 ## Priority of what is open
 
@@ -25,10 +25,13 @@ Ordered for running field cases first, then output, then exotic features.
 3. **Explicit NNC and AQUCON into a box stop the run; no keep-coarse fallback** (a sealing MULTREGT
    whose boundary crosses a box works, face by face — deck `CARFIN_MULTREGT_INTO_BOX`)
    (rows 16, 17, 20). Exported field models carry explicit NNCs.
-4. **Numerical-aquifer cell list empty after refinement** (row 38). Any AQUNUM deck plus any box
-   loosens the convergence check grid-wide. Silent; small fix in opm-gridrefined.
-5. **Aquifer connections on a host face are dropped** (rows 36, 37): analytic warns, constant-flux
-   and aquifer tracers silently.
+4. ~~Numerical-aquifer cell list empty after refinement~~ — **fixed** (grid `522dcc8a`). Also fixed:
+   a parallel run with a numerical aquifer and a box hung, rank 0's NNC output not finding the
+   aquifer connection on the refined output grid (sim `5af4736eb`); `CARFIN1_AQUNUM` runs at np=2,3.
+5. ~~Aquifer connections on a host face are dropped~~ — **fixed** (sim `d7e39e32b`): shared among
+   the children with a boundary face on that side, by area, for analytic and constant-flux
+   aquifers (tracers follow). `CARFIN1_AQUFETP`: AAQT within 0.07 % of the unrefined deck (was 0);
+   `CARFIN1_AQUFLUX`: equal. Serial and np=2,3.
 6. **Partitioning ignores refinement** (row 22): a box and its halo go to one rank, weighted as
    coarse cells. Field-size boxes make that rank the bottleneck.
 7. **Drogon water −1.3 % against the reference at 212 d** (oil and gas within 0.03 %), all of it in
@@ -113,9 +116,9 @@ against the references"; none changes production measurably)
 ### ② Aquifers, face and depth edits
 | Row | Gap | Ours | Evidence |
 |---|---|---|---|
-| 36 | Aquifer influx to wrong cells | P | No longer wrong cells; host connections dropped (analytic warns). |
-| 37 | AQUANCON on a host face | O | Dropped with a warning, not spread over children. |
-| 38 | Numerical-aquifer list empty after refinement | O | Filled only for level zero. |
+| 36 | Aquifer influx to wrong cells | **S** | Host connections shared among the children's boundary faces by area (sim `d7e39e32b`). |
+| 37 | AQUANCON on a host face | **S** | Spread over the children; analytic, constant-flux and tracers (sim `d7e39e32b`). |
+| 38 | Numerical-aquifer list empty after refinement | **S** | Mapped onto the leaf (grid `522dcc8a`); parallel NNC output no longer hangs (sim `5af4736eb`). |
 | 39 | NNC export abort with a numerical aquifer | S | Looked up on the leaf. |
 | 40 | AQANCONL | O | Not read. |
 | 41 | TRAN edits / PINCH ALL | **S** | Per refined face; EQUALS/ADD scale a coarse face's refined faces by its change; serial = np=2 (sim `7f33842f8`). Decks `CARFIN_TRAN_{MULTIPLY,EQUALS,MULTX}` give the same run. |
