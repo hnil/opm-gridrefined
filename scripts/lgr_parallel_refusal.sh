@@ -29,6 +29,7 @@ CASES=(
     SPE1CASE1_CARFIN_GR                  # box cannot be kept on one rank
     TLGR_SIDE_BAD                        # incompatible subdivisions
     SPE1CASE1_CARFIN1_NESTED             # nested box touching its parent
+    SPE1CASE1_CARFIN_NNC_INTO_BOX        # explicit NNC naming a refined cell
 )
 
 mkdir -p "$WORK"
