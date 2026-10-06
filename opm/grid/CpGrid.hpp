@@ -1241,6 +1241,8 @@ namespace Dune
         const Vector faceCenterEcl(int cell_index, int face, const Dune::cpgrid::Intersection& intersection) const;
 
         const Vector faceAreaNormalEcl(int face) const;
+        /// As above, for a face of the given level's grid.
+        const Vector faceAreaNormalEcl(int face, int level) const;
 
 
         // Geometry
