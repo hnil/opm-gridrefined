@@ -20,6 +20,8 @@
 #define OPM_GRID_REFINEMENT_RETAINEDCORNERPOINTINPUT_HEADER_INCLUDED
 
 #include <array>
+#include <set>
+#include <utility>
 #include <vector>
 
 namespace Opm
@@ -40,6 +42,10 @@ struct RetainedCornerPointInput
     /// True if level zero was built edge-conformal: the refined leaf is then
     /// made edge-conformal too (an edge-conformalization post-pass).
     bool edgeConformal{false};
+    /// Level zero's pinch-out connections (Cartesian pairs) and whether PINCH
+    /// was active, so a grid rebuilt from this description has them too.
+    std::set<std::pair<int,int>> pinchNnc{};
+    bool pinchActive{false};
 };
 
 } // namespace Refinement
