@@ -137,9 +137,22 @@ RefinedBlockGrdecl refineBlock(const std::array<int,3>& parentDims,
                         for (int di = 0; di < 2; ++di) {
                             const double a = di ? subs[0].fracHi[ir] : subs[0].fracLo[ir];
 
+                            // Where the parent is collapsed (as MINPV leaves it), so are
+                            // the children; rounding would otherwise invert some.
+                            double parentDz = 0.0;
+                            for (int pj = 0; pj < 2; ++pj) {
+                                const double wj = (pj == 0) ? (1.0 - b) : b;
+                                for (int pi = 0; pi < 2; ++pi) {
+                                    const double wi = (pi == 0) ? (1.0 - a) : a;
+                                    parentDz += wi*wj*(parentZ(2*ci + pi, 2*cj + pj, 2*ck + 1)
+                                                       - parentZ(2*ci + pi, 2*cj + pj, 2*ck));
+                                }
+                            }
+                            const double cc = (parentDz == 0.0) ? 0.0 : c;
+
                             double z = 0.0;
                             for (int pk = 0; pk < 2; ++pk) {
-                                const double wk = (pk == 0) ? (1.0 - c) : c;
+                                const double wk = (pk == 0) ? (1.0 - cc) : cc;
                                 for (int pj = 0; pj < 2; ++pj) {
                                     const double wj = (pj == 0) ? (1.0 - b) : b;
                                     for (int pi = 0; pi < 2; ++pi) {
