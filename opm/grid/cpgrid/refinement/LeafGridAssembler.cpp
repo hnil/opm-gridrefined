@@ -30,6 +30,7 @@
 #include <opm/grid/cpgrid/refinement/GridStateWriter.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <functional>
 #include <map>
 #include <set>
@@ -380,6 +381,39 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
             if (tag != NNC_FACE && axisOf(tag) == axis
                 && row[e].orientation() == (side > 0)) {
                 directionFaces.push_back(face);
+            }
+        }
+
+        // Below a pinch-out the parent keeps its own top face, now without a
+        // neighbour, and gains the face that connects it to the cell above.
+        if ((axis == 2) && (directionFaces.size() == 2)) {
+            int open = 0;
+            int pinched = -1;
+            const auto ijk = [&dims0](int cart) {
+                return std::array<int,3>{ cart % dims0[0], (cart / dims0[0]) % dims0[1],
+                                          cart / (dims0[0] * dims0[1]) };
+            };
+            const auto p = ijk(level0.globalCell()[parent]);
+            for (const int face : directionFaces) {
+                const auto cells = faceToCell0[EntityRep<1>(face, true)];
+                if (cells.size() == 1) {
+                    ++open;
+                    continue;
+                }
+                for (int q = 0; q < cells.size(); ++q) {
+                    const int cell = cells[q].index();
+                    if ((cell == parent) || (cell == kRemoteCell)) {
+                        continue;
+                    }
+                    const auto c = ijk(level0.globalCell()[cell]);
+                    if ((c[0] == p[0]) && (c[1] == p[1]) && (std::abs(c[2] - p[2]) > 1)) {
+                        pinched = cell;
+                    }
+                }
+            }
+            if ((open == 1) && (pinched >= 0)) {
+                verifiedNeighbor[key] = pinched;
+                return pinched;
             }
         }
 
