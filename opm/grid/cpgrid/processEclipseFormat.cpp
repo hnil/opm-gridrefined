@@ -364,6 +364,8 @@ namespace cpgrid
             retained->zcorn = zcornData;
             retained->actnum = actnumData;
             retained->edgeConformal = edge_conformal;
+            retained->pinchNnc = nnc_cells[PinchNNC];
+            retained->pinchActive = pinchActive;
             this->retained_cp_input_ = std::move(retained);
         }
 

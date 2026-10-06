@@ -339,6 +339,12 @@ namespace Dune
                                   bool turn_normals = false,
                                   bool edge_conformal = false);
 
+        /// As above, with pinch-out connections given as Cartesian index pairs.
+        void processEclipseFormat(const grdecl& input_data,
+                                  const std::set<std::pair<int,int>>& pinchNnc,
+                                  bool pinchActive,
+                                  bool edge_conformal);
+
         //@}
 
         /// \name Cartesian grid extensions.
