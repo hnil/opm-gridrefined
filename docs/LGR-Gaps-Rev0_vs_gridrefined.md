@@ -1,7 +1,7 @@
 # LGR-Gaps-Rev0 (upstream master 2026-09-28) against our LGR branches
 
-State of the code on `lgr-status` (2026-10-06, evening): opm-common `1612152af`,
-opm-gridrefined `c4197188`, opm-simulators `7d633df23`; decks on opm-tests `new_lgr`.
+State of the code on `lgr-status` (2026-10-06, late): opm-common `276717b87`,
+opm-gridrefined `9cfc7d04`, opm-simulators `938cad6fe`; decks on opm-tests `new_lgr`.
 Each row of the sheet is judged against our code, not upstream's.
 
 S = solved, P = partial, O = open, NA = does not apply to our design.
@@ -13,13 +13,17 @@ Ordered for running field cases first, then output, then exotic features.
 
 **Tier 1 — field cases run, and run right**
 
-1. ~~Wells completed both inside and outside a box~~ — **supported** (common `22dba4680`): global
+1. ~~Wells completed both inside and outside a box~~ — **supported**, both ways of declaring it:
+   a global well (COMPDAT) whose connections partly fall in a box (common `22dba4680`), and an LGR
+   well (WELSPECL/COMPDATL) with extra COMPDAT connections in the global grid (common `276717b87`;
+   deck `CARFIN_LGRWELL_PLUS_GLOBAL`, same BHP as the other form, serial and np=2,3). Global
    connections stay global, the rest go into the LGR; deck `CARFIN_WELL_CROSSES_BOX` runs serial and
    np=2,3 and agrees with the same well inside a box over both layers.
 2. ~~TRAN* edits refused in parallel, EQUALS/ADD everywhere~~ — **done** (sim `7f33842f8`): edits
    per refined face (this also fixed faces that shared one value in every serial run with a TRAN*
    edit), EQUALS/ADD scale a coarse face's refined faces, parallel supported. Drogon runs at np=2.
-3. **Explicit NNC, AQUCON and sealing MULTREGT into a box stop the run; no keep-coarse fallback**
+3. **Explicit NNC and AQUCON into a box stop the run; no keep-coarse fallback** (a sealing MULTREGT
+   whose boundary crosses a box works, face by face — deck `CARFIN_MULTREGT_INTO_BOX`)
    (rows 16, 17, 20). Exported field models carry explicit NNCs.
 4. **Numerical-aquifer cell list empty after refinement** (row 38). Any AQUNUM deck plus any box
    loosens the convergence check grid-wide. Silent; small fix in opm-gridrefined.
@@ -34,8 +38,11 @@ Ordered for running field cases first, then output, then exotic features.
 8. **Per-box properties only for GRID keywords** (row 44 rest): REFINE…ENDFIN in EDIT/PROPS/REGIONS
    (SATNUM, end-point scaling) is still refused; nested blocks inherit.
 9. **Wells spanning several LGRs: connections de-duplicated by I/J/K alone** (row 46 rest).
-10. **A setup error on one rank can still hang outside the refinement step** (row 21 rest);
-    `scripts/lgr_parallel_refusal.sh` covers the refusals we know of.
+10. ~~A setup error on one rank can hang~~ — **done** for the refinement steps: rank 0's output-grid
+    refusal is broadcast (sim `ab343cc0f`) and a failure in any rank's own refinement now stops all
+    ranks (sim `ecda69fff`, checked by injecting a failure on rank 1 at np=2,3). The one rank-local
+    refusal left in the transmissibility setup (MULTREGT on an EDITNNCR record) is gone (sim
+    `938cad6fe`). `scripts/lgr_parallel_refusal.sh`: 6 decks, all refused cleanly at np=2,3.
 
 **Tier 2 — output and reporting**
 
@@ -78,12 +85,12 @@ against the references"; none changes production measurably)
 | 13 | Host < 8 corners | NA | Boxes are resampled as corner-point descriptions and processed normally; collapsed hosts give exactly collapsed children (grid `406c99ac`). |
 | 14 | Host on a fault with throw | S | Mosaic faces at faulted box sides; unit tests `faultAtBoxBoundaryBuilds`, `faultInsideBoxEndToEnd`. |
 | 15 | Host next to a pinch-out | **S** | Pinch connections carried into a box and across its top (grid `039589af`, `a1132f7a`); decks `CARFIN_PINCH_{GEOM,MINPV}_{ABOVE,BELOW,ACROSS}` all connect; Drogon's refined cells with TRANZ 0 against the reference 6456 → 66. |
-| 16 | Host with an NNC / aquifer face | P | EDITNNC/PINCH handled; NNC keyword, AQUCON, sealing MULTREGT into a box refused with cell names (sim `d3267a242`). |
+| 16 | Host with an NNC / aquifer face | P | EDITNNC/EDITNNCR/PINCH handled; sealing MULTREGT across a box works per face; NNC keyword and AQUCON into a box refused with cell names on every rank (sim `d3267a242`). |
 | 17 | Numerical-aquifer hosts | P | Refused at input naming cell and box (common `235f86ffb`). |
 | 18 | Inactive host | S | ACTNUM inherited and rebuilt after MINPV; Norne box with inactive hosts runs np=1,2. |
 | 19 | Switching off children | **S** | Block MINPV and block ACTNUM remove children (common `9ce78f152`); emptying an active host is refused, naming it. Decks `CARFIN_BLOCKACTNUM(_EMPTY)`. |
 | 20 | One unrefinable host stops the box | P | Most reasons gone (rows 13–15); remaining refusals name the cell; no keep-coarse fallback. |
-| 21 | A failure on one rank hangs | **S** for refinement | Rank 0's refusal broadcast to all ranks (sim `ab343cc0f`); `lgr_parallel_refusal.sh` refuses its 5 decks cleanly at np=2,3. Other setup paths not audited. |
+| 21 | A failure on one rank hangs | **S** | Rank 0's refusal broadcast (sim `ab343cc0f`); a refinement failure on any rank stops all (sim `ecda69fff`); the rank-local MULTREGT/EDITNNCR refusal removed (sim `938cad6fe`). `lgr_parallel_refusal.sh` refuses its 6 decks cleanly at np=2,3. The well model was not audited. |
 | 22 | Partitioning ignores refinement | O | Box + halo pinned to one rank, weighted as coarse cells. |
 | 23 | LGR wells partitioned by the wrong cells | S | Wells anchored to their box's host cells (sim `2a7cc52fd`), np up to 8. |
 
