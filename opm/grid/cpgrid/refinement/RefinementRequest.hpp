@@ -66,6 +66,9 @@ struct BlockRefinement
     /// simulation grid and the LGR grids written to the EGRID agree on which
     /// refined cells exist.
     std::vector<int> minpvRemoved{};
+    /// Refined pillars from the box's own first layer (as the reference) rather
+    /// than the column's; boxes stacked on sheared pillars then do not conform.
+    bool pillarsFromBoxLayer{false};
 };
 
 /// The request's subdivision in one direction, uniform tables filled in when

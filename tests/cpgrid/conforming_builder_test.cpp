@@ -23,6 +23,7 @@
 
 #include <opm/grid/CpGrid.hpp>
 #include <opm/grid/cpgrid/refinement/ConformingBlockBuilder.hpp>
+#include <opm/grid/cpgrid/refinement/GrdeclRefinement.hpp>
 #include <opm/grid/cpgrid/refinement/RefinementBuilder.hpp>
 #include <opm/grid/cpgpreprocess/preprocess.h>
 
@@ -1365,4 +1366,24 @@ BOOST_AUTO_TEST_CASE(skewPillarStackedBoxesShareKFace)
     // rx*ry = 4 connections per parent pair, 2x2 pairs, counted twice.
     BOOST_CHECK_EQUAL(crossBoxConnections(grid, 2, 2), 16*2);
     BOOST_CHECK_GT(minVertexPairDistance(grid), 1e-3);
+}
+
+// Boxes stacked in a column get bitwise the same refined pillars; with
+// pillarsFromBoxLayer (the reference) only a box starting at the column top does.
+BOOST_AUTO_TEST_CASE(skewPillarRefinedPillarsFromColumn)
+{
+    const auto parent = makeSkewPillarGrid({2, 2, 4}, tiltedDepth);
+    const auto coordOf = [&parent](int k0, int k1, bool fromBox) {
+        Opm::Refinement::BlockRefinement req;
+        req.name = "B";
+        req.cellsPerDim = {2, 2, 1};
+        req.startIJK = {0, 0, k0};
+        req.endIJK = {2, 2, k1};
+        req.pillarsFromBoxLayer = fromBox;
+        return Opm::Refinement::refineBlock(parent.dims, parent.coord.data(),
+                                            parent.zcorn.data(), parent.actnum.data(),
+                                            req).coord;
+    };
+    BOOST_CHECK(coordOf(0, 2, false) == coordOf(2, 4, false));
+    BOOST_CHECK(coordOf(0, 2, true) == coordOf(0, 2, false));
 }
