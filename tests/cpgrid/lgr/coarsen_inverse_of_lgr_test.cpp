@@ -201,3 +201,42 @@ BOOST_AUTO_TEST_CASE(CoarsenedBoxIsTheCoarseGridRefinedAroundIt)
         {{0,1,1}, {1,2,2}}, {{2,1,1}, {3,2,2}}};
     checkSame(shape(merged(fine, {box})), shape(refined(fine, 2, slabs)));
 }
+
+// Neighbouring boxes with the same factor give the grid of the box they make up.
+BOOST_AUTO_TEST_CASE(AdjacentBoxesAreOneBox)
+{
+    const auto fine = uniformGrid(8, 100.0, 10.0);
+    CoarsenRequest whole;
+    whole.startIJK = {0, 0, 0};
+    whole.endIJK = {8, 8, 4};
+    whole.cellsPerDim = {4, 4, 2};
+    std::vector<CoarsenRequest> quarters;
+    for (int j = 0; j < 2; ++j) {
+        for (int i = 0; i < 2; ++i) {
+            CoarsenRequest r;
+            r.startIJK = {4*i, 4*j, 0};
+            r.endIJK = {4*i + 4, 4*j + 4, 4};
+            r.cellsPerDim = {2, 2, 2};
+            quarters.push_back(r);
+        }
+    }
+    checkSame(shape(merged(fine, {whole})), shape(merged(fine, quarters)));
+}
+
+// Where the coarsening is a corner-point grid, the merge gives that grid, also
+// where neighbouring columns group their layers differently.
+BOOST_AUTO_TEST_CASE(CollapseIsTheCornerPointCoarsening)
+{
+    const auto fine = uniformGrid(6, 100.0, 10.0);
+    CoarsenRequest south, north;
+    south.startIJK = {0, 0, 0};
+    south.endIJK = {6, 3, 6};
+    south.cellsPerDim = {3, 3, 2};
+    north.startIJK = {0, 3, 0};
+    north.endIJK = {6, 6, 6};
+    north.cellsPerDim = {3, 3, 6};
+    const auto coarse = Opm::Coarsening::coarsenCornerPoint(fine, {south, north}).grid;
+    Dune::CpGrid grid;
+    grid.processEclipseFormat(view(coarse), false, false, true);
+    checkSame(shape(merged(fine, {south, north})), shape(grid));
+}
