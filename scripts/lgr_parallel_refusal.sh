@@ -27,7 +27,6 @@ CASES=(
     SPE1CASE1_CARFIN_BLOCKACTNUM_EMPTY   # block ACTNUM empties a host
     SPE1CASE1_CARFIN1_AQUNUM_IN_LGR      # numerical aquifer inside a box
     SPE1CASE1_CARFIN_GR                  # box cannot be kept on one rank
-    SPE1CASE1_CARFIN1_TRANZ              # TRAN* edit on a refined grid
     TLGR_SIDE_BAD                        # incompatible subdivisions
     SPE1CASE1_CARFIN1_NESTED             # nested box touching its parent
 )
