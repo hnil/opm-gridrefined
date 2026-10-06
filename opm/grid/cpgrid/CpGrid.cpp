@@ -1744,10 +1744,12 @@ CpGrid::processEclipseFormat(const Opm::EclipseGrid* ecl_grid_ptr,
 void CpGrid::processEclipseFormatCoarsened(const grdecl& input_data,
                                            const std::vector<int>& blockOfCartesian,
                                            const std::vector<std::array<int,6>>& blockBox,
-                                           const bool edge_conformal)
+                                           const bool edge_conformal,
+                                           const bool collapse_coarse_faces)
 {
     current_data_->back()->processEclipseFormatCoarsened(input_data, blockOfCartesian,
-                                                         blockBox, edge_conformal);
+                                                         blockBox, edge_conformal,
+                                                         collapse_coarse_faces);
 
     current_data_->back()->ccobj_.broadcast(current_data_->back()->logical_cartesian_size_.data(),
                                             current_data_->back()->logical_cartesian_size_.size(),

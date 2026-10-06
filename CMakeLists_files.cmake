@@ -99,6 +99,7 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/faulted_boundary_test.cpp
   tests/cpgrid/edge_conformal_refinement_test.cpp
   tests/cpgrid/refined_structure_comparison_test.cpp
+  tests/cpgrid/lgr/coarsen_inverse_of_lgr_test.cpp
   tests/cpgrid/lgr/consistent_vertex_order_in_face_test.cpp
   tests/cpgrid/lgr/getParentIntersectionFromLgrBoundaryFace_test.cpp
   tests/cpgrid/lgr/lgr_cartesian_idx_test.cpp
