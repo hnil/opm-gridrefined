@@ -298,3 +298,54 @@ BOOST_AUTO_TEST_CASE(localFaultedBoxMatchesDirectBlockGrid)
     BOOST_CHECK_GT(countInteriorFacePairs(gridB.leafGridView()),
                    countInteriorFacePairs(gridC.leafGridView()));
 }
+
+// processEclipseFormat orders a cell's corners differently on a left-handed
+// grid; the leaf's children must still carry their own corners.
+BOOST_AUTO_TEST_CASE(childCornersMatchOnBothHandednesses)
+{
+    for (const double ySign : {1.0, -1.0}) {
+        auto parent = makeFaultedGrid({5, 3, 2}, 2, 0.6);
+        for (std::size_t p = 0; p < parent.coord.size(); p += 3) {
+            parent.coord[p + 1] *= ySign;
+        }
+
+        Dune::CpGrid gridA;
+        auto rawParent = parent.raw();
+        gridA.processEclipseFormat(rawParent, false);
+
+        BuilderGuard guard(std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+            parent.dims, parent.coord, parent.zcorn, parent.actnum));
+
+        Opm::Refinement::BlockRefinement req;
+        req.name = "LGR1";
+        req.cellsPerDim = {3, 2, 2};
+        req.startIJK = {1, 0, 0};
+        req.endIJK = {4, 3, 2};
+        gridA.addLgrsUpdateLeafView({req.cellsPerDim}, {req.startIJK}, {req.endIJK}, {req.name});
+
+        const auto refined = Opm::Refinement::refineBlock(parent.dims, parent.coord.data(),
+                                                          parent.zcorn.data(), nullptr, req);
+        Dune::CpGrid gridB;
+        const auto rawRefined = grdecl{ {refined.dims[0], refined.dims[1], refined.dims[2]},
+                                        refined.coord.data(), refined.zcorn.data(),
+                                        refined.actnum.data() };
+        gridB.processEclipseFormat(rawRefined, false);
+        std::map<int, std::array<double,3>> oracle;
+        for (const auto& element : Dune::elements(gridB.leafGridView())) {
+            oracle[gridB.globalCell()[element.index()]] = gridB.getEclCentroid(element.index());
+        }
+
+        for (const auto& element : Dune::elements(gridA.leafGridView())) {
+            if (!element.hasFather()) {
+                continue;
+            }
+            const int levelIdx = element.getLevelElem().index();
+            const auto it = oracle.find(gridA.currentData()[1]->globalCell()[levelIdx]);
+            BOOST_REQUIRE(it != oracle.end());
+            const auto centroid = gridA.getEclCentroid(element.index());
+            for (int c = 0; c < 3; ++c) {
+                BOOST_CHECK_SMALL(centroid[c] - it->second[c], 1e-10);
+            }
+        }
+    }
+}

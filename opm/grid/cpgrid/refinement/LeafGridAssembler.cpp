@@ -56,6 +56,58 @@ struct SourceRef
     int index; // cell or face index in that grid
 };
 
+// processEclipseFormat reverses face nodes for left-handed or upward-ZCORN input, which
+// swaps the halves of cell_to_point along J. Returns the XOR mask from logical corner
+// (bit0 = I, bit1 = J, bit2 = K) to cell_to_point slot, detected from logical neighbours.
+int cornerSlotMask(CpGridData& grid)
+{
+    const auto& c2p = GridStateWriter::cellToPoint(grid);
+    const auto& gc = grid.globalCell();
+    const auto dims = grid.logicalCartesianSize();
+    std::map<int,int> cellOfCart;
+    for (int c = 0; c < static_cast<int>(gc.size()); ++c) {
+        cellOfCart.emplace(gc[c], c);
+    }
+    int mask = 0;
+    for (int axis = 0; axis < 2; ++axis) {
+        const int bit = 1 << axis;
+        const int stride = axis == 0 ? 1 : dims[0];
+        int agree = 0;
+        int flipped = 0;
+        for (const auto& [cart, cell] : cellOfCart) {
+            const int ijk = axis == 0 ? cart % dims[0] : (cart / dims[0]) % dims[1];
+            if (ijk + 1 >= dims[axis]) {
+                continue;
+            }
+            const auto nb = cellOfCart.find(cart + stride);
+            if (nb == cellOfCart.end()) {
+                continue;
+            }
+            const auto& nbPoints = c2p[nb->second];
+            const auto shared = [&](int side) {
+                for (int corner = 0; corner < 8; ++corner) {
+                    if (((corner & bit) != 0) == (side == 1) &&
+                        std::find(nbPoints.begin(), nbPoints.end(), c2p[cell][corner]) == nbPoints.end()) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+            const bool high = shared(1);
+            const bool low = shared(0);
+            agree += high && !low;
+            flipped += low && !high;
+            if (agree + flipped >= 16) {
+                break;
+            }
+        }
+        if (flipped > agree) {
+            mask |= bit;
+        }
+    }
+    return mask;
+}
+
 int axisOf(face_tag tag)
 {
     switch (tag) {
@@ -179,6 +231,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         std::vector<int> faceToLeaf;
     };
     std::vector<BoxData> boxes(numBoxes);
+    const int mask0 = cornerSlotMask(level0);
 
     for (int b = 0; b < numBoxes; ++b) {
         BoxData& box = boxes[b];
@@ -216,6 +269,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         box.cornerEquiv.assign(box.level->size(3), -1);
         auto& cellToPointL = GridStateWriter::cellToPoint(*box.level);
         const auto& rd = box.refinedDims;
+        const int maskL = cornerSlotMask(*box.level);
         for (int cell = 0; cell < box.level->size(0); ++cell) {
             const int parent = childToParent[cell][1];
             const int refinedCart = box.level->globalCell()[cell];
@@ -239,10 +293,10 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                     }
                 }
                 if (onParentCorner) {
-                    const int parentCorner = cellToPoint0[parent][parentCornerIJK[0]
-                                                                 + 2*parentCornerIJK[1]
-                                                                 + 4*parentCornerIJK[2]];
-                    box.cornerEquiv[cellToPointL[cell][corner]] = parentCorner;
+                    const int parentCorner = cellToPoint0[parent][(parentCornerIJK[0]
+                                                                  + 2*parentCornerIJK[1]
+                                                                  + 4*parentCornerIJK[2]) ^ mask0];
+                    box.cornerEquiv[cellToPointL[cell][corner ^ maskL]] = parentCorner;
                 }
             }
         }
@@ -432,7 +486,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                               : (axis == 1) ? ((corner >> 1) & 1)
                                             : ((corner >> 2) & 1);
                 if (bit == fixedBit) {
-                    expected.insert(cellToPoint0[parent][corner]);
+                    expected.insert(cellToPoint0[parent][corner ^ mask0]);
                 }
             }
             std::set<int> actual;
@@ -1324,6 +1378,8 @@ assembleNestedLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         // refined lattice position, whose relation to the parent holds whether
         // or not the box is graded.
         const auto& rdb = box.refinedDims;
+        const int maskP = cornerSlotMask(pgrid);
+        const int maskL = cornerSlotMask(*box.level);
         box.cornerEquiv.assign(box.level->size(3), -1);
         for (int cell = 0; cell < box.level->size(0); ++cell) {
             const int parent = childToParent[cell][1];
@@ -1348,10 +1404,10 @@ assembleNestedLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                     }
                 }
                 if (onParentCorner) {
-                    const int parentCorner = parentCellToPoint[parent][parentCornerIJK[0]
-                                                                      + 2*parentCornerIJK[1]
-                                                                      + 4*parentCornerIJK[2]];
-                    box.cornerEquiv[cellToPointL[cell][corner]] = parentCornerLeaf(b, parentCorner);
+                    const int parentCorner = parentCellToPoint[parent][(parentCornerIJK[0]
+                                                                       + 2*parentCornerIJK[1]
+                                                                       + 4*parentCornerIJK[2]) ^ maskP];
+                    box.cornerEquiv[cellToPointL[cell][corner ^ maskL]] = parentCornerLeaf(b, parentCorner);
                 }
             }
         }
