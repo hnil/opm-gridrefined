@@ -28,15 +28,92 @@
 #include <opm/grid/cpgrid/refinement/GridStateWriter.hpp>
 #include <opm/grid/cpgpreprocess/preprocess.h>
 
+#include <array>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace Opm
 {
 namespace Refinement
 {
+
+namespace {
+
+/// The parent's pinch connections inside the box, carried to the children: each
+/// joins the bottom children of the upper cell to the top children of the lower.
+std::set<std::pair<int,int>>
+boxPinchPairs(const Dune::cpgrid::CpGridData& parentGrid,
+              const std::array<int,3>& parentDims,
+              const BlockRefinement& request,
+              const std::array<int,3>& refinedDims)
+{
+    auto& parent = const_cast<Dune::cpgrid::CpGridData&>(parentGrid);
+    const auto& faceToCell = GridStateWriter::faceToCell(parent);
+    const auto& faceTag = GridStateWriter::faceTag(parent);
+    const auto& globalCell = parentGrid.globalCell();
+
+    const std::array<AxisSubdivision,3> subs = { axisSubdivision(request, 0),
+                                                axisSubdivision(request, 1),
+                                                axisSubdivision(request, 2) };
+    const auto refinedOf = [&subs](int dim, int offset) {
+        std::vector<int> refined;
+        for (std::size_t r = 0; r < subs[dim].size(); ++r) {
+            if (subs[dim].parentOffset[r] == offset) {
+                refined.push_back(static_cast<int>(r));
+            }
+        }
+        return refined;
+    };
+    const auto ijkOf = [&parentDims](int cart) {
+        return std::array<int,3>{ cart % parentDims[0],
+                                  (cart / parentDims[0]) % parentDims[1],
+                                  cart / (parentDims[0] * parentDims[1]) };
+    };
+    const auto inBox = [&request](const std::array<int,3>& ijk) {
+        for (int d = 0; d < 3; ++d) {
+            if (ijk[d] < request.startIJK[d] || ijk[d] >= request.endIJK[d]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    std::set<std::pair<int,int>> pairs;
+    const int numFaces = faceToCell.size();
+    for (int face = 0; face < numFaces; ++face) {
+        const auto row = faceToCell[Dune::cpgrid::EntityRep<1>(face, true)];
+        // A distributed grid marks an off-rank neighbour with an out-of-range index.
+        if ((row.size() != 2) || (faceTag.get(face) != K_FACE)
+            || (row[0].index() >= static_cast<int>(globalCell.size()))
+            || (row[1].index() >= static_cast<int>(globalCell.size()))) {
+            continue;
+        }
+        auto upper = ijkOf(globalCell[row[0].index()]);
+        auto lower = ijkOf(globalCell[row[1].index()]);
+        if (upper[2] > lower[2]) {
+            std::swap(upper, lower);
+        }
+        if ((upper[0] != lower[0]) || (upper[1] != lower[1]) || (lower[2] - upper[2] < 2)
+            || !inBox(upper) || !inBox(lower)) {
+            continue;
+        }
+        const int kUpper = refinedOf(2, upper[2] - request.startIJK[2]).back();
+        const int kLower = refinedOf(2, lower[2] - request.startIJK[2]).front();
+        for (const int ir : refinedOf(0, upper[0] - request.startIJK[0])) {
+            for (const int jr : refinedOf(1, upper[1] - request.startIJK[1])) {
+                const int column = ir + refinedDims[0] * jr;
+                const int layer = refinedDims[0] * refinedDims[1];
+                pairs.emplace(column + layer * kUpper, column + layer * kLower);
+            }
+        }
+    }
+    return pairs;
+}
+
+} // Anonymous namespace
 
 std::shared_ptr<Dune::cpgrid::CpGridData>
 assembleBlockLevelGrid(const Dune::cpgrid::CpGridData& parentGrid,
@@ -71,13 +148,15 @@ assembleBlockLevelGrid(const Dune::cpgrid::CpGridData& parentGrid,
     raw.zcorn = refined.zcorn.data();
     raw.actnum = refined.actnum.data();
 
+    // Index 0 holds pinch connections, as for level zero.
     std::array<std::set<std::pair<int,int>>, 2> nnc;
+    nnc[0] = boxPinchPairs(parentGrid, parentDims, request, refined.dims);
     level->processEclipseFormat(raw,
                                 nullptr,
                                 nnc,
                                 /* remove_ij_boundary = */ false,
                                 /* turn_normals = */ false,
-                                /* pinchActive = */ false,
+                                /* pinchActive = */ !nnc[0].empty(),
                                 /* tolerance_unique_points = */ 0.0,
                                 /* edge_conformal = */ false);
 
