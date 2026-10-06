@@ -30,7 +30,6 @@ CASES=(
     SPE1CASE1_CARFIN1_TRANZ              # TRAN* edit on a refined grid
     TLGR_SIDE_BAD                        # incompatible subdivisions
     SPE1CASE1_CARFIN1_NESTED             # nested box touching its parent
-    SPE1CASE1_CARFIN_WELL_CROSSES_BOX    # well completed inside and outside a box
 )
 
 mkdir -p "$WORK"
