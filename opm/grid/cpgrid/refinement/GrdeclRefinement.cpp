@@ -22,6 +22,9 @@
 
 #include <opm/grid/cpgrid/refinement/GrdeclRefinement.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -83,19 +86,37 @@ RefinedBlockGrdecl refineBlock(const std::array<int,3>& parentDims,
     out.dims = refinedDims(request);
 
     // --- COORD: sub-pillars ---------------------------------------------
-    // Endpoint-wise bilinear interpolation of the four parent pillars
-    // surrounding the lateral position. On parent pillar positions the
-    // weights collapse and the parent pillar is reproduced exactly, so
-    // adjacent parent columns see identical sub-pillars.
+    // Inside a parent column the line passes through the bilinear interpolation of the
+    // parent's corners on the top and bottom of the box's first layer, as the reference
+    // does; parent pillars are copied, and an all-collapsed column falls back to
+    // endpoint-wise interpolation of the four parent pillars.
     const auto parentPillar = [&](int i, int j) {
         return coord + 6*(static_cast<std::size_t>(j)*(nx + 1) + i);
+    };
+    const auto parentCorner = [&](int i, int j, int k, int di, int dj, int dk) {
+        const double* pil = parentPillar(i + di, j + dj);
+        const double z = zcorn[static_cast<std::size_t>(2*i + di)
+                               + 2*static_cast<std::size_t>(nx)*(2*j + dj)
+                               + 4*static_cast<std::size_t>(nx)*ny*(2*k + dk)];
+        const double t = (pil[5] != pil[2]) ? (z - pil[2]) / (pil[5] - pil[2]) : 0.0;
+        return std::array<double,3>{ pil[0] + t*(pil[3] - pil[0]), pil[1] + t*(pil[4] - pil[1]), z };
+    };
+
+    // A line on a parent boundary inside the box belongs to the lower column, as in the
+    // reference; across a fault the two columns' corners differ.
+    const auto pillarPos = [&](int refinedIdx, int dim) {
+        auto pos = lateralPos(refinedIdx, subs[dim], request.startIJK[dim]);
+        if ((pos.frac == 0.0) && (pos.cell > request.startIJK[dim])) {
+            pos = { pos.cell - 1, 1.0 };
+        }
+        return pos;
     };
 
     out.coord.resize(6 * static_cast<std::size_t>(out.dims[0] + 1) * (out.dims[1] + 1));
     for (int jr = 0; jr <= out.dims[1]; ++jr) {
-        const auto [cj, b] = lateralPos(jr, subs[1], request.startIJK[1]);
+        const auto [cj, b] = pillarPos(jr, 1);
         for (int ir = 0; ir <= out.dims[0]; ++ir) {
-            const auto [ci, a] = lateralPos(ir, subs[0], request.startIJK[0]);
+            const auto [ci, a] = pillarPos(ir, 0);
 
             const double* p00 = parentPillar(ci,     cj);
             const double* p10 = parentPillar(ci + 1, cj);
@@ -106,6 +127,33 @@ RefinedBlockGrdecl refineBlock(const std::array<int,3>& parentDims,
             for (int comp = 0; comp < 6; ++comp) {
                 sub[comp] = (1.0 - a)*(1.0 - b)*p00[comp] + a*(1.0 - b)*p10[comp]
                           + (1.0 - a)*b*p01[comp] + a*b*p11[comp];
+            }
+            if ((a == 0.0 || a == 1.0) && (b == 0.0 || b == 1.0)) {
+                continue;
+            }
+            for (int ck = request.startIJK[2]; ck < request.endIJK[2]; ++ck) {
+                std::array<std::array<double,3>,2> ends{};
+                for (int dk = 0; dk < 2; ++dk) {
+                    for (int dj = 0; dj < 2; ++dj) {
+                        for (int di = 0; di < 2; ++di) {
+                            const double w = (di ? a : 1.0 - a) * (dj ? b : 1.0 - b);
+                            const auto x = parentCorner(ci, cj, ck, di, dj, dk);
+                            for (int c = 0; c < 3; ++c) {
+                                ends[dk][c] += w*x[c];
+                            }
+                        }
+                    }
+                }
+                const double dz = ends[1][2] - ends[0][2];
+                if (std::abs(dz) > 1.0e-6) {
+                    // Keep the endpoint depths, so only the line changes.
+                    for (double* end : {sub, sub + 3}) {
+                        const double t = (end[2] - ends[0][2]) / dz;
+                        end[0] = ends[0][0] + t*(ends[1][0] - ends[0][0]);
+                        end[1] = ends[0][1] + t*(ends[1][1] - ends[0][1]);
+                    }
+                    break;
+                }
             }
         }
     }
