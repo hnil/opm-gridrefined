@@ -355,10 +355,13 @@ namespace Dune
         /// \param[in] blockOfCartesian Block of each Cartesian cell.
         /// \param[in] blockBox Each block's box, {i1, j1, k1, i2, j2, k2}.
         /// \param[in] edge_conformal Process the input edge-conformal.
+        /// \param[in] collapse_coarse_faces One face between two coarse cells
+        ///            instead of the fine faces: the grid an LGR would give.
         void processEclipseFormatCoarsened(const grdecl& input_data,
                                            const std::vector<int>& blockOfCartesian,
                                            const std::vector<std::array<int,6>>& blockBox,
-                                           bool edge_conformal = false);
+                                           bool edge_conformal = false,
+                                           bool collapse_coarse_faces = false);
 
         //@}
 
