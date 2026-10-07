@@ -1,8 +1,8 @@
 # LGR-Gaps-Rev0 (upstream master 2026-09-28) against our LGR branches
 
 State of the code on `lgr-status` (2026-10-07): opm-common `276717b87`, opm-gridrefined
-`67a91c84` (includes the mechanics coarsening), opm-simulators `369b6a92b`; decks on opm-tests
-`lgr-status`.
+`5d624985` (includes the mechanics coarsening; `dynamic-refinement` now equals `lgr-status`),
+opm-simulators `369b6a92b`; decks on opm-tests `lgr-status`.
 Each row of the sheet is judged against our code, not upstream's.
 
 S = solved, P = partial, O = open, NA = does not apply to our design.
@@ -65,6 +65,20 @@ Ordered for running field cases first, then output, then exotic features.
 19. CARFIN on AluGrid/PolyhedralGrid silently ignored (row 49).
 20. AQANCONL not read (row 40).
 21. Black-oil explicit PRESSURE without ρgΔz in a vertically split host (row 26 rest).
+
+**Planned — beyond the sheet**
+
+- **Partial refinement of a box, `REFCELLS`** (OPM extension): a per-parent mask inside a CARFIN
+  block; one LGR per CARFIN with the unrefined parents' children inactive. Design and phases in
+  `opm-gridrefined/docs/DESIGN-REFCELLS.md`; first version about two weeks.
+- **All of the coarsening work onto this branch.** Merged so far: the opm-grid mechanics
+  coarsening chain. Still outside: the geomech-only grid commits (edge-conformal thin cells,
+  all-point communication, corner-cell overlap, numerical aquifer mode, NNC checks, the
+  geometric-body check and the latest collapsed-merge rework of 2026-10-07), the upstream
+  opm-grid merge `ed27fd83` they sit on, coarsening below the input grid
+  (`opm-gridrefined/docs/COARSENING-BELOW-INPUT.md`, design only) and a flow `COARSEN`
+  keyword. The geomech stack on `lgr-status` (`opm_geomech/lgrstatus`, branch
+  `geomech-lgr-status-2026-10`) already carries the first two.
 
 **For later — remaining INIT differences against the references** (detail under "INIT and EGRID
 against the references"; none changes production measurably)
