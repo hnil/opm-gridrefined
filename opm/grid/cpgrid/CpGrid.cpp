@@ -1732,7 +1732,8 @@ CpGrid::processEclipseFormat(const Opm::EclipseGrid* ecl_grid,
                              const bool turn_normals,
                              const bool clip_z,
                              const bool pinchActive,
-                             const bool edge_conformal)
+                             const bool edge_conformal,
+                             const double merge_tolerance)
 {
     auto removed_cells = current_data_->back()->
         processEclipseFormat(ecl_grid, ecl_state,
@@ -1740,7 +1741,8 @@ CpGrid::processEclipseFormat(const Opm::EclipseGrid* ecl_grid,
                              turn_normals,
                              clip_z,
                              pinchActive,
-                             edge_conformal);
+                             edge_conformal,
+                             merge_tolerance);
 
     current_data_->back()->ccobj_.broadcast(current_data_->back()->logical_cartesian_size_.data(),
                                             current_data_->back()->logical_cartesian_size_.size(),
@@ -1754,10 +1756,12 @@ CpGrid::processEclipseFormat(const Opm::EclipseGrid* ecl_grid_ptr,
                              const bool periodic_extension,
                              const bool turn_normals,
                              const bool clip_z,
-                             const bool edge_conformal)
+                             const bool edge_conformal,
+                             const double merge_tolerance)
 {
     return processEclipseFormat(ecl_grid_ptr, ecl_state, periodic_extension, turn_normals, clip_z,
-                                !ecl_grid_ptr || ecl_grid_ptr->isPinchActive(), edge_conformal);
+                                !ecl_grid_ptr || ecl_grid_ptr->isPinchActive(), edge_conformal,
+                                merge_tolerance);
 }
 
 #endif

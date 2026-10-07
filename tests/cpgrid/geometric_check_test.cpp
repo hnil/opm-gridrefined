@@ -348,9 +348,10 @@ PERMZ
 6*100 /
 )") + (pinch ? "PINCH\n0.5 /\n" : "");
     };
-    const auto build = [](const std::string& text, Dune::CpGrid& grid) {
+    const auto build = [](const std::string& text, Dune::CpGrid& grid, double mergeTolerance = 0.0) {
         Opm::EclipseState es(Opm::Parser{}.parseString(text));
-        grid.processEclipseFormat(&es.getInputGrid(), &es, false, false, false, /*edge_conformal*/ true);
+        grid.processEclipseFormat(&es.getInputGrid(), &es, false, false, false,
+                                  /*edge_conformal*/ true, mergeTolerance);
     };
     const auto shortEdges = [](const Dune::CpGrid& grid, double length) {
         int count = 0;
@@ -384,5 +385,19 @@ PERMZ
     const auto check = Dune::cpgrid::checkGeometric(pinched);
     BOOST_TEST_MESSAGE("pinched, edge-conformal: " << check.summary());
     BOOST_CHECK(check.ok());
+
+    // Without PINCH, the merge tolerance alone does the same.
+    Dune::CpGrid merged;
+    build(deck(false), merged, 0.5);
+    BOOST_CHECK_EQUAL(merged.numCells(), 5);
+    BOOST_CHECK_EQUAL(shortEdges(merged, 0.5), 0);
+    BOOST_CHECK_CLOSE(volume(merged), volume(input), 1e-10);
+    BOOST_CHECK(Dune::cpgrid::checkGeometric(merged).ok());
+
+    // A tolerance below the sliver leaves it.
+    Dune::CpGrid fine;
+    build(deck(false), fine, 0.05);
+    BOOST_CHECK_EQUAL(fine.numCells(), 6);
+    BOOST_CHECK_GT(shortEdges(fine, 0.5), 0);
 }
 #endif
