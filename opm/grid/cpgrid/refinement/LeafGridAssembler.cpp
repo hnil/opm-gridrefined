@@ -30,6 +30,7 @@
 #include <opm/grid/cpgrid/refinement/GridStateWriter.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <functional>
 #include <map>
 #include <set>
@@ -49,11 +50,83 @@ using Dune::cpgrid::EntityRep;
 using Opm::Refinement::BlockRefinement;
 using Opm::Refinement::GridStateWriter;
 
+// Numerical aquifer cells are never refined (refused in a box): each is a
+// level-zero cell of the leaf.
+std::vector<int> leafAquiferCells(const CpGridData& level0,
+                                  const std::vector<std::array<int,2>>& leafToLevel)
+{
+    const auto& aquifer0 = level0.sortedNumAquiferCells();
+    std::vector<int> leaf;
+    if (aquifer0.empty()) {
+        return leaf;
+    }
+    for (int cell = 0; cell < static_cast<int>(leafToLevel.size()); ++cell) {
+        if ((leafToLevel[cell][0] == 0) &&
+            std::binary_search(aquifer0.begin(), aquifer0.end(), leafToLevel[cell][1])) {
+            leaf.push_back(cell);
+        }
+    }
+    return leaf;
+}
+
 struct SourceRef
 {
     int grid;  // 0 = level zero, b+1 = level grid of box b
     int index; // cell or face index in that grid
 };
+
+
+// processEclipseFormat reverses face nodes for left-handed or upward-ZCORN input, which
+// swaps the halves of cell_to_point along J. Returns the XOR mask from logical corner
+// (bit0 = I, bit1 = J, bit2 = K) to cell_to_point slot, detected from logical neighbours.
+int cornerSlotMask(CpGridData& grid)
+{
+    const auto& c2p = GridStateWriter::cellToPoint(grid);
+    const auto& gc = grid.globalCell();
+    const auto dims = grid.logicalCartesianSize();
+    std::map<int,int> cellOfCart;
+    for (int c = 0; c < static_cast<int>(gc.size()); ++c) {
+        cellOfCart.emplace(gc[c], c);
+    }
+    int mask = 0;
+    for (int axis = 0; axis < 2; ++axis) {
+        const int bit = 1 << axis;
+        const int stride = axis == 0 ? 1 : dims[0];
+        int agree = 0;
+        int flipped = 0;
+        for (const auto& [cart, cell] : cellOfCart) {
+            const int ijk = axis == 0 ? cart % dims[0] : (cart / dims[0]) % dims[1];
+            if (ijk + 1 >= dims[axis]) {
+                continue;
+            }
+            const auto nb = cellOfCart.find(cart + stride);
+            if (nb == cellOfCart.end()) {
+                continue;
+            }
+            const auto& nbPoints = c2p[nb->second];
+            const auto shared = [&](int side) {
+                for (int corner = 0; corner < 8; ++corner) {
+                    if (((corner & bit) != 0) == (side == 1) &&
+                        std::find(nbPoints.begin(), nbPoints.end(), c2p[cell][corner]) == nbPoints.end()) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+            const bool high = shared(1);
+            const bool low = shared(0);
+            agree += high && !low;
+            flipped += low && !high;
+            if (agree + flipped >= 16) {
+                break;
+            }
+        }
+        if (flipped > agree) {
+            mask |= bit;
+        }
+    }
+    return mask;
+}
 
 #if HAVE_MPI
 // On a distributed leaf, ids through the local id set follow local numbering
@@ -242,6 +315,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         std::vector<int> faceToLeaf;
     };
     std::vector<BoxData> boxes(numBoxes);
+    const int mask0 = cornerSlotMask(level0);
 
     for (int b = 0; b < numBoxes; ++b) {
         BoxData& box = boxes[b];
@@ -279,6 +353,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         box.cornerEquiv.assign(box.level->size(3), -1);
         auto& cellToPointL = GridStateWriter::cellToPoint(*box.level);
         const auto& rd = box.refinedDims;
+        const int maskL = cornerSlotMask(*box.level);
         for (int cell = 0; cell < box.level->size(0); ++cell) {
             const int parent = childToParent[cell][1];
             const int refinedCart = box.level->globalCell()[cell];
@@ -302,10 +377,10 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                     }
                 }
                 if (onParentCorner) {
-                    const int parentCorner = cellToPoint0[parent][parentCornerIJK[0]
-                                                                 + 2*parentCornerIJK[1]
-                                                                 + 4*parentCornerIJK[2]];
-                    box.cornerEquiv[cellToPointL[cell][corner]] = parentCorner;
+                    const int parentCorner = cellToPoint0[parent][(parentCornerIJK[0]
+                                                                  + 2*parentCornerIJK[1]
+                                                                  + 4*parentCornerIJK[2]) ^ mask0];
+                    box.cornerEquiv[cellToPointL[cell][corner ^ maskL]] = parentCorner;
                 }
             }
         }
@@ -447,6 +522,39 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
             }
         }
 
+        // Below a pinch-out the parent keeps its own top face, now without a
+        // neighbour, and gains the face that connects it to the cell above.
+        if ((axis == 2) && (directionFaces.size() == 2)) {
+            int open = 0;
+            int pinched = -1;
+            const auto ijk = [&dims0](int cart) {
+                return std::array<int,3>{ cart % dims0[0], (cart / dims0[0]) % dims0[1],
+                                          cart / (dims0[0] * dims0[1]) };
+            };
+            const auto p = ijk(level0.globalCell()[parent]);
+            for (const int face : directionFaces) {
+                const auto cells = faceToCell0[EntityRep<1>(face, true)];
+                if (cells.size() == 1) {
+                    ++open;
+                    continue;
+                }
+                for (int q = 0; q < cells.size(); ++q) {
+                    const int cell = cells[q].index();
+                    if ((cell == parent) || (cell == kRemoteCell)) {
+                        continue;
+                    }
+                    const auto c = ijk(level0.globalCell()[cell]);
+                    if ((c[0] == p[0]) && (c[1] == p[1]) && (std::abs(c[2] - p[2]) > 1)) {
+                        pinched = cell;
+                    }
+                }
+            }
+            if ((open == 1) && (pinched >= 0)) {
+                verifiedNeighbor[key] = pinched;
+                return pinched;
+            }
+        }
+
         int neighbor = -1;
         if (directionFaces.size() > 1) {
             neighbor = kFaultedSide;            // fault-split face
@@ -462,7 +570,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                               : (axis == 1) ? ((corner >> 1) & 1)
                                             : ((corner >> 2) & 1);
                 if (bit == fixedBit) {
-                    expected.insert(cellToPoint0[parent][corner]);
+                    expected.insert(cellToPoint0[parent][corner ^ mask0]);
                 }
             }
             std::set<int> actual;
@@ -1181,6 +1289,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     GridStateWriter::setGlobalCell(*leaf, std::move(leafGlobalCell));
     GridStateWriter::setIndexSet(*leaf, numLeafCells, numLeafCorners);
     GridStateWriter::setParentRelations(*leaf, std::move(leafChildToParent), std::move(leafIdxInParent));
+    GridStateWriter::setAquiferCells(*leaf, leafAquiferCells(level0, leafToLevel));
     GridStateWriter::setLeafToLevel(*leaf, std::move(leafToLevel));
     GridStateWriter::setCornerHistory(*leaf, std::move(leafCornerHistory));
     GridStateWriter::setRefinementMaxLevel(*leaf, numBoxes);
@@ -1356,6 +1465,8 @@ assembleNestedLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         // refined lattice position, whose relation to the parent holds whether
         // or not the box is graded.
         const auto& rdb = box.refinedDims;
+        const int maskP = cornerSlotMask(pgrid);
+        const int maskL = cornerSlotMask(*box.level);
         box.cornerEquiv.assign(box.level->size(3), -1);
         for (int cell = 0; cell < box.level->size(0); ++cell) {
             const int parent = childToParent[cell][1];
@@ -1380,10 +1491,10 @@ assembleNestedLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                     }
                 }
                 if (onParentCorner) {
-                    const int parentCorner = parentCellToPoint[parent][parentCornerIJK[0]
-                                                                      + 2*parentCornerIJK[1]
-                                                                      + 4*parentCornerIJK[2]];
-                    box.cornerEquiv[cellToPointL[cell][corner]] = parentCornerLeaf(b, parentCorner);
+                    const int parentCorner = parentCellToPoint[parent][(parentCornerIJK[0]
+                                                                       + 2*parentCornerIJK[1]
+                                                                       + 4*parentCornerIJK[2]) ^ maskP];
+                    box.cornerEquiv[cellToPointL[cell][corner ^ maskL]] = parentCornerLeaf(b, parentCorner);
                 }
             }
         }
@@ -1754,6 +1865,7 @@ assembleNestedLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     GridStateWriter::setGlobalCell(*leaf, std::move(leafGlobalCell));
     GridStateWriter::setIndexSet(*leaf, numLeafCells, numLeafCorners);
     GridStateWriter::setParentRelations(*leaf, std::move(leafChildToParent), std::move(leafIdxInParent));
+    GridStateWriter::setAquiferCells(*leaf, leafAquiferCells(level0, leafToLevel));
     GridStateWriter::setLeafToLevel(*leaf, std::move(leafToLevel));
     GridStateWriter::setCornerHistory(*leaf, std::move(leafCornerHistory));
     GridStateWriter::setRefinementMaxLevel(*leaf, numBoxes);

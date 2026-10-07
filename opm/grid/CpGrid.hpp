@@ -339,6 +339,13 @@ namespace Dune
                                   bool turn_normals = false,
                                   bool edge_conformal = false);
 
+
+        /// As above, with pinch-out connections given as Cartesian index pairs.
+        void processEclipseFormat(const grdecl& input_data,
+                                  const std::set<std::pair<int,int>>& pinchNnc,
+                                  bool pinchActive,
+                                  bool edge_conformal);
+
         /// Build a grid whose cells are boxes of a corner-point description
         /// merged into one. Faces inside a block are dropped and the rest are
         /// kept as they are, so a coarse cell simply has several faces where
@@ -1258,6 +1265,8 @@ namespace Dune
         const Vector faceCenterEcl(int cell_index, int face, const Dune::cpgrid::Intersection& intersection) const;
 
         const Vector faceAreaNormalEcl(int face) const;
+        /// As above, for a face of the given level's grid.
+        const Vector faceAreaNormalEcl(int face, int level) const;
 
 
         // Geometry

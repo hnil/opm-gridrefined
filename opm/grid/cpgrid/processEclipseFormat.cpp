@@ -389,6 +389,8 @@ namespace cpgrid
             retained->zcorn = zcornData;
             retained->actnum = actnumData;
             retained->edgeConformal = edge_conformal;
+            retained->pinchNnc = nnc_cells[PinchNNC];
+            retained->pinchActive = pinchActive;
             if (Opm::RetainCornerPointInput::enabled()) {
                 Opm::RetainCornerPointInput::store(retained);
             }

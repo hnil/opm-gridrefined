@@ -295,6 +295,54 @@ BOOST_AUTO_TEST_CASE(distortedVerticalPillarGridConservesVolume)
                       boxVolume(parentGrid, req.startIJK, req.endIJK), 1e-8);
 }
 
+BOOST_AUTO_TEST_CASE(collapsedParentGivesCollapsedChildren)
+{
+    // MINPV collapses a removed cell to zero thickness at its top. Its children
+    // must be exactly collapsed too, or rounding inverts some and the
+    // corner-point processor rejects the block.
+    auto depth = [](int i_, int j_, int k_) {
+        const double x = cellOf(i_) + sideOf(i_);
+        const double y = cellOf(j_) + sideOf(j_);
+        return 2.0*(cellOf(k_) + sideOf(k_)) + 0.3*std::sin(0.8*x) + 0.2*std::cos(0.5*y);
+    };
+    auto parent = makeVerticalPillarGrid({3, 3, 3}, depth);
+    const int nx = parent.dims[0], ny = parent.dims[1];
+    const auto z = [&](int i_, int j_, int k_) -> double& {
+        return parent.zcorn[i_ + 2*nx*j_ + 4*nx*ny*k_];
+    };
+    for (int j_ = 0; j_ < 2*ny; ++j_) {
+        for (int i_ = 0; i_ < 2*nx; ++i_) {
+            z(i_, j_, 3) = z(i_, j_, 2);        // layer k = 1 collapsed at its top
+        }
+    }
+
+    Opm::Refinement::BlockRefinement req;
+    req.name = "LGR1";
+    req.cellsPerDim = {3, 3, 3};
+    req.startIJK = {0, 0, 0};
+    req.endIJK = {3, 3, 3};
+
+    const auto refined = Opm::Refinement::refineBlock(parent.dims, parent.coord.data(),
+                                                      parent.zcorn.data(), nullptr, req);
+
+    const int rx = refined.dims[0], ry = refined.dims[1];
+    const auto rz = [&](int i_, int j_, int k_) {
+        return refined.zcorn[i_ + 2*rx*j_ + 4*rx*ry*k_];
+    };
+    for (int kr = 3; kr < 6; ++kr) {
+        for (int j_ = 0; j_ < 2*ry; ++j_) {
+            for (int i_ = 0; i_ < 2*rx; ++i_) {
+                BOOST_CHECK_EQUAL(rz(i_, j_, 2*kr + 1), rz(i_, j_, 2*kr));
+            }
+        }
+    }
+
+    Dune::CpGrid refinedGrid;
+    const auto rawRefined = grdecl{ {refined.dims[0], refined.dims[1], refined.dims[2]},
+                                    refined.coord.data(), refined.zcorn.data(), refined.actnum.data() };
+    BOOST_CHECK_NO_THROW(refinedGrid.processEclipseFormat(rawRefined, false));
+}
+
 BOOST_AUTO_TEST_CASE(slantedPillarRefinementConservesCenterOfMass)
 {
     // Ground-truth geometric test: subdividing a block of skewed corner-point

@@ -272,6 +272,6 @@ BOOST_AUTO_TEST_CASE(boxTouchingOverlapThrows)
 
     // Box i in [5,8) straddles the i=6 partition boundary -> must throw.
     BOOST_CHECK_THROW(grid.addLgrsUpdateLeafView({{2,2,2}}, {{5,1,0}}, {{8,3,2}}, {"LGR1"}),
-                      std::logic_error);
+                      std::runtime_error);  // rethrown collectively on every rank
 }
 #endif // HAVE_MPI

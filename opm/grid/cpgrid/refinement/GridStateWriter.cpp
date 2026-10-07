@@ -68,6 +68,11 @@ void GridStateWriter::setLeafToLevel(Data& grid, std::vector<std::array<int,2>> 
     grid.leaf_to_level_cells_ = std::move(leafToLevel);
 }
 
+void GridStateWriter::setAquiferCells(Data& grid, std::vector<int> cells)
+{
+    grid.aquifer_cells_ = std::move(cells);
+}
+
 void GridStateWriter::setCornerHistory(Data& grid, std::vector<std::array<int,2>> cornerHistory)
 {
     grid.corner_history_ = std::move(cornerHistory);
