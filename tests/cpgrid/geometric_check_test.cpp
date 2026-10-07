@@ -204,9 +204,10 @@ BOOST_AUTO_TEST_CASE(PinchedLayerWithoutMergeLeavesAVoid)
     BOOST_CHECK_CLOSE(-check.boundaries[1].volume, 2*dx*2*dx*dz, 1e-6);
 }
 
-// Coarsened by the merge with collapsed faces: geometric. The corner-point
-// coarsening of the same records leaves nodes hanging where the columns group
-// their layers differently.
+// Coarsened by the merge with collapsed faces, and as a corner-point grid processed
+// edge-conformal: both geometric, also where the columns group their layers
+// differently. Without edge-conformal processing the thin cells' corners hang on
+// the thick cells' faces.
 BOOST_AUTO_TEST_CASE(CoarsenedGrids)
 {
     const auto g = uniformGrid();
@@ -224,7 +225,84 @@ BOOST_AUTO_TEST_CASE(CoarsenedGrids)
 
     const auto coarse = Opm::Coarsening::coarsenCornerPoint(g, {south, north}).grid;
     const auto cornerPoint = processed(coarse, true);
-    BOOST_TEST_MESSAGE("corner-point: " << cornerPoint.summary());
-    BOOST_CHECK_GT(cornerPoint.nonConformingCells, 0);
-    BOOST_CHECK_EQUAL(cornerPoint.boundaries.size(), 1u);
+    BOOST_TEST_MESSAGE("corner-point, edge-conformal: " << cornerPoint.summary());
+    BOOST_CHECK(cornerPoint.ok());
+
+    const auto plain = processed(coarse, false);
+    BOOST_TEST_MESSAGE("corner-point, not edge-conformal: " << plain.summary());
+    BOOST_CHECK_GT(plain.nonConformingCells, 0);
+    BOOST_CHECK_EQUAL(plain.boundaries.size(), 1u);
+}
+
+// One column's layer boundary moved 1e-7 m on a pillar it shares with three others.
+// Without a tolerance that is a second node, which edge-conformal processing lists in
+// the neighbours' faces (no hanging node, but a 1e-7 m edge); with a tolerance the
+// points merge and the faces keep four corners.
+BOOST_AUTO_TEST_CASE(NearCoincidentPillarPoints)
+{
+    auto g = uniformGrid();
+    z(g, 0, 0, 1, 1, 1, 1) += 1e-7;   // bottom of (0,0,1) at the pillar (100, 100)
+    z(g, 0, 0, 2, 1, 1, 0) += 1e-7;   // top of (0,0,2) there
+
+    const auto facesAndNodes = [&g](double tolerance) {
+        processed_grid out{};
+        const auto in = view(g);
+        process_grdecl(0, /*edge_conformal*/ 1, tolerance, &in, nullptr, &out);
+        // the face between (1,0,2) and (1,1,2): at y = 100, x in [100, 200], z in [20, 30]
+        int corners = -1;
+        for (int f = 0; f < out.number_of_faces; ++f) {
+            const int c0 = out.face_neighbors[2*f], c1 = out.face_neighbors[2*f + 1];
+            if (std::min(c0, c1) == 1 + n*(0 + n*2) && std::max(c0, c1) == 1 + n*(1 + n*2)) {
+                corners = static_cast<int>(out.face_node_ptr[f + 1] - out.face_node_ptr[f]);
+            }
+        }
+        const std::pair<int,int> result{out.number_of_nodes, corners};
+        free_processed_grid(&out);
+        return result;
+    };
+    const auto [nodesExact, cornersExact] = facesAndNodes(0.0);
+    const auto [nodesMerged, cornersMerged] = facesAndNodes(1e-6);
+    BOOST_CHECK_EQUAL(nodesExact, nodesMerged + 1);
+    BOOST_CHECK_EQUAL(cornersExact, 5);
+    BOOST_CHECK_EQUAL(cornersMerged, 4);
+
+    const auto check = processed(g, true);
+    BOOST_TEST_MESSAGE(check.summary());
+    BOOST_CHECK(check.ok());
+}
+
+// A fault between i = 1 and i = 2 whose throw changes sign along it, so layer
+// boundaries of the two sides cross: the crossings are nodes of the fault faces,
+// and edge-conformal processing lists them in the top and bottom faces too.
+BOOST_AUTO_TEST_CASE(FaultWithCrossingLayers)
+{
+    auto g = uniformGrid();
+    for (int k = 0; k < n; ++k) {
+        for (int j = 0; j < n; ++j) {
+            for (int i = 2; i < n; ++i) {
+                for (int dk = 0; dk < 2; ++dk) {
+                    for (int dj = 0; dj < 2; ++dj) {
+                        for (int di = 0; di < 2; ++di) {
+                            const double y = (j + dj)*dx;                 // 0 .. 400
+                            z(g, i, j, k, di, dj, dk) += 6.0*(y/(n*dx)) - 2.5;   // -2.5 .. +3.5 m
+                        }
+                    }
+                }
+            }
+        }
+    }
+    {
+        processed_grid out{};
+        const auto in = view(g);
+        process_grdecl(0, 1, 0.0, &in, nullptr, &out);
+        BOOST_CHECK_GT(out.number_of_nodes, out.number_of_nodes_on_pillars);   // crossings
+        free_processed_grid(&out);
+    }
+    const auto plain = processed(g, false);
+    BOOST_TEST_MESSAGE("not edge-conformal: " << plain.summary());
+    BOOST_CHECK_GT(plain.nonConformingCells, 0);
+
+    const auto conformal = processed(g, true);
+    BOOST_TEST_MESSAGE("edge-conformal: " << conformal.summary());
+    BOOST_CHECK(conformal.ok());
 }
