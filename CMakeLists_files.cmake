@@ -39,6 +39,7 @@ list(APPEND MAIN_SOURCE_FILES
   opm/grid/cpgrid/Indexsets.cpp
   opm/grid/cpgrid/LgrOutputHelpers.cpp
   opm/grid/cpgrid/coarsening/CornerPointCoarsening.cpp
+  opm/grid/cpgrid/GeometricCheck.cpp
   opm/grid/cpgrid/refinement/ConformingBlockBuilder.cpp
   opm/grid/cpgrid/refinement/EdgeConformal.cpp
   opm/grid/cpgrid/refinement/FaultedBoundaryFaces.cpp
@@ -117,6 +118,7 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/level_grid_assembler_test.cpp
   tests/cpgrid/conforming_builder_test.cpp
   tests/cpgrid/coarsening_test.cpp
+  tests/cpgrid/geometric_check_test.cpp
   tests/cpgrid/adaptive_cpgrid_test.cpp
   tests/cpgrid/adaptive_cpgrid_bench.cpp
   tests/cpgrid/faulted_boundary_test.cpp
@@ -207,6 +209,7 @@ list(APPEND PUBLIC_HEADER_FILES
   opm/grid/cpgrid/Iterators.hpp
   opm/grid/cpgrid/LgrOutputHelpers.hpp
   opm/grid/cpgrid/coarsening/CornerPointCoarsening.hpp
+  opm/grid/cpgrid/GeometricCheck.hpp
   opm/grid/cpgrid/refinement/ConformingBlockBuilder.hpp
   opm/grid/cpgrid/refinement/EdgeConformal.hpp
   opm/grid/cpgrid/refinement/FaultedBoundaryFaces.hpp

@@ -1,0 +1,230 @@
+/*
+  Copyright 2026 Equinor ASA.
+
+  This file is part of the Open Porous Media project (OPM).
+
+  OPM is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  OPM is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with OPM.  If not, see <http://www.gnu.org/licenses/>.
+*/
+#include "config.h"
+
+#define BOOST_TEST_MODULE GeometricCheckTest
+#include <boost/test/unit_test.hpp>
+
+#include <opm/grid/CpGrid.hpp>
+#include <opm/grid/cpgpreprocess/preprocess.h>
+#include <opm/grid/cpgrid/GeometricCheck.hpp>
+#include <opm/grid/cpgrid/coarsening/CornerPointCoarsening.hpp>
+
+#include <dune/common/parallel/mpihelper.hh>
+
+#include <cmath>
+#include <vector>
+
+struct Fixture
+{
+    Fixture()
+    {
+        int argc = boost::unit_test::framework::master_test_suite().argc;
+        char** argv = boost::unit_test::framework::master_test_suite().argv;
+        Dune::MPIHelper::instance(argc, argv);
+    }
+};
+BOOST_GLOBAL_FIXTURE(Fixture);
+
+namespace
+{
+using Opm::Coarsening::CoarsenRequest;
+using Opm::Coarsening::Grdecl;
+
+constexpr int n = 4;
+constexpr double dx = 100.0, dz = 10.0;
+
+Grdecl uniformGrid()
+{
+    Grdecl g;
+    g.dims = {n, n, n};
+    for (int j = 0; j <= n; ++j) {
+        for (int i = 0; i <= n; ++i) {
+            g.coord.insert(g.coord.end(), {i*dx, j*dx, 0.0, i*dx, j*dx, n*dz});
+        }
+    }
+    g.zcorn.resize(8ull*n*n*n);
+    for (int k = 0; k < 2*n; ++k) {
+        for (int j = 0; j < 2*n; ++j) {
+            for (int i = 0; i < 2*n; ++i) {
+                g.zcorn[i + 2ull*n*(j + 2ull*n*k)] = ((k + 1)/2)*dz;
+            }
+        }
+    }
+    g.actnum.assign(1ull*n*n*n, 1);
+    return g;
+}
+
+// ZCORN entry of corner (di, dj, dk) of cell (i, j, k).
+double& z(Grdecl& g, int i, int j, int k, int di, int dj, int dk)
+{
+    return g.zcorn[(2*i + di) + 2ull*n*((2*j + dj) + 2ull*n*(2*k + dk))];
+}
+
+grdecl view(const Grdecl& g)
+{
+    grdecl in{};
+    for (int d = 0; d < 3; ++d) {
+        in.dims[d] = g.dims[d];
+    }
+    in.coord = g.coord.data();
+    in.zcorn = g.zcorn.data();
+    in.actnum = g.actnum.data();
+    return in;
+}
+
+// Corner-point processing without pinch, as a deck without PINCH.
+Dune::cpgrid::GeometricCheck processed(const Grdecl& g, bool edgeConformal)
+{
+    Dune::CpGrid grid;
+    grid.processEclipseFormat(view(g), false, false, edgeConformal);
+    return Dune::cpgrid::checkGeometric(grid);
+}
+
+// Merge route: edge-conformal with pinch, as the mechanics grid is built.
+Dune::cpgrid::GeometricCheck merged(const Grdecl& g, const std::vector<CoarsenRequest>& requests)
+{
+    const auto layout = Opm::Coarsening::blockLayout(g.dims, requests);
+    Dune::CpGrid grid;
+    grid.processEclipseFormatCoarsened(view(g), layout.blockOfCartesian, layout.boxes,
+                                       /*edge_conformal*/ true, /*collapse_coarse_faces*/ true);
+    return Dune::cpgrid::checkGeometric(grid);
+}
+
+// Columns (1..2) x (1..2): layer 1 removed to zero thickness at its top.
+Grdecl pinchedLayer(bool cellBelowTakesTheVolume)
+{
+    auto g = uniformGrid();
+    for (int j = 1; j < 3; ++j) {
+        for (int i = 1; i < 3; ++i) {
+            g.actnum[i + n*(j + n*1)] = 0;
+            for (int dj = 0; dj < 2; ++dj) {
+                for (int di = 0; di < 2; ++di) {
+                    z(g, i, j, 1, di, dj, 1) = z(g, i, j, 1, di, dj, 0);
+                    if (cellBelowTakesTheVolume) {
+                        z(g, i, j, 2, di, dj, 0) = z(g, i, j, 1, di, dj, 0);
+                    }
+                }
+            }
+        }
+    }
+    return g;
+}
+} // namespace
+
+BOOST_AUTO_TEST_CASE(UniformGridIsGeometric)
+{
+    const auto check = processed(uniformGrid(), true);
+    BOOST_TEST_MESSAGE(check.summary());
+    BOOST_CHECK(check.ok());
+    BOOST_REQUIRE_EQUAL(check.boundaries.size(), 1u);
+    BOOST_CHECK_CLOSE(check.boundaries[0].volume, n*dx*n*dx*n*dz, 1e-9);
+}
+
+// Layer 1 lifted off layer 2 in four columns: the gap is a closed surface of its own.
+BOOST_AUTO_TEST_CASE(VoidBetweenLayers)
+{
+    auto g = uniformGrid();
+    for (int j = 1; j < 3; ++j) {
+        for (int i = 1; i < 3; ++i) {
+            for (int dj = 0; dj < 2; ++dj) {
+                for (int di = 0; di < 2; ++di) {
+                    z(g, i, j, 1, di, dj, 1) -= 4.0;   // bottom of layer 1 up by 4 m
+                }
+            }
+        }
+    }
+    for (const bool ec : {false, true}) {
+        const auto check = processed(g, ec);
+        BOOST_TEST_MESSAGE(check.summary());
+        BOOST_CHECK(!check.ok());
+        BOOST_REQUIRE_EQUAL(check.boundaries.size(), 2u);
+        BOOST_CHECK_CLOSE(-check.boundaries[1].volume, 2*dx*2*dx*4.0, 1e-6);
+    }
+}
+
+// An inactive cell inside the body is a cavity.
+BOOST_AUTO_TEST_CASE(InactiveCellIsACavity)
+{
+    auto g = uniformGrid();
+    g.actnum[1 + n*(1 + n*1)] = 0;
+    const auto check = processed(g, true);
+    BOOST_TEST_MESSAGE(check.summary());
+    BOOST_CHECK(!check.ok());
+    BOOST_REQUIRE_EQUAL(check.boundaries.size(), 2u);
+    BOOST_CHECK_CLOSE(-check.boundaries[1].volume, dx*dx*dz, 1e-6);
+}
+
+// A zero-thickness layer, its volume moved to the cell below (as MINPV merging
+// does): without pinch the layers on either side do not touch, a crack of zero
+// volume; with pinch, as the mechanics grid is processed, the body is whole.
+BOOST_AUTO_TEST_CASE(PinchedLayerCracksWithoutPinch)
+{
+    const auto g = pinchedLayer(/*cellBelowTakesTheVolume*/ true);
+    for (const bool ec : {false, true}) {
+        const auto check = processed(g, ec);
+        BOOST_TEST_MESSAGE("no pinch, edge-conformal " << ec << ": " << check.summary());
+        BOOST_CHECK(!check.ok());
+        BOOST_REQUIRE_GE(check.boundaries.size(), 2u);
+        BOOST_CHECK_SMALL(check.boundaries[1].volume, 1e-6);
+        BOOST_CHECK_CLOSE(check.boundaries[1].area, 2*2*dx*dx*2, 1e-6);   // both sides
+    }
+    std::vector<CoarsenRequest> none;
+    const auto check = merged(g, none);
+    BOOST_TEST_MESSAGE("pinch: " << check.summary());
+    BOOST_CHECK_EQUAL(check.boundaries.size(), 1u);
+    BOOST_CHECK_EQUAL(check.unpairedBoundaryEdges, 0);
+}
+
+// The same layer removed without giving its volume away: a void, which pinch
+// does not close.
+BOOST_AUTO_TEST_CASE(PinchedLayerWithoutMergeLeavesAVoid)
+{
+    auto g = pinchedLayer(/*cellBelowTakesTheVolume*/ false);
+    const auto check = merged(g, {});
+    BOOST_TEST_MESSAGE(check.summary());
+    BOOST_CHECK(!check.ok());
+    BOOST_REQUIRE_EQUAL(check.boundaries.size(), 2u);
+    BOOST_CHECK_CLOSE(-check.boundaries[1].volume, 2*dx*2*dx*dz, 1e-6);
+}
+
+// Coarsened by the merge with collapsed faces: geometric. The corner-point
+// coarsening of the same records leaves nodes hanging where the columns group
+// their layers differently.
+BOOST_AUTO_TEST_CASE(CoarsenedGrids)
+{
+    const auto g = uniformGrid();
+    CoarsenRequest south, north;
+    south.startIJK = {0, 0, 0};
+    south.endIJK = {4, 2, 4};
+    south.cellsPerDim = {2, 2, 2};
+    north.startIJK = {0, 2, 0};
+    north.endIJK = {4, 4, 4};
+    north.cellsPerDim = {2, 2, 4};
+
+    const auto collapsed = merged(g, {south, north});
+    BOOST_TEST_MESSAGE("collapse: " << collapsed.summary());
+    BOOST_CHECK(collapsed.ok());
+
+    const auto coarse = Opm::Coarsening::coarsenCornerPoint(g, {south, north}).grid;
+    const auto cornerPoint = processed(coarse, true);
+    BOOST_TEST_MESSAGE("corner-point: " << cornerPoint.summary());
+    BOOST_CHECK_GT(cornerPoint.nonConformingCells, 0);
+    BOOST_CHECK_EQUAL(cornerPoint.boundaries.size(), 1u);
+}
