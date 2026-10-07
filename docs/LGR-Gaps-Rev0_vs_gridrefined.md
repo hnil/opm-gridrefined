@@ -1,7 +1,8 @@
 # LGR-Gaps-Rev0 (upstream master 2026-09-28) against our LGR branches
 
-State of the code on `lgr-status` (2026-10-06, late): opm-common `276717b87`,
-opm-gridrefined `522dcc8a`, opm-simulators `d7e39e32b`; decks on opm-tests `new_lgr`.
+State of the code on `lgr-status` (2026-10-07): opm-common `276717b87`, opm-gridrefined
+`67a91c84` (includes the mechanics coarsening), opm-simulators `369b6a92b`; decks on opm-tests
+`lgr-status`.
 Each row of the sheet is judged against our code, not upstream's.
 
 S = solved, P = partial, O = open, NA = does not apply to our design.
@@ -49,7 +50,7 @@ Ordered for running field cases first, then output, then exotic features.
 
 **Tier 2 — output and reporting**
 
-11. WBP for LGR wells and RFT (row 34).
+11. WBP for LGR wells (now zero with a warning, no longer wrong cells) and RFT (row 34).
 12. Host B* summary vectors read zero; no aggregation rule (row 50).
 13. Restart read in parallel (row 52).
 14. Regression tests run but compare nothing; no thermal LGR deck (row 53).
@@ -110,7 +111,7 @@ against the references"; none changes production measurably)
 | 31 | Compositional region reports | O | No `mapRegionsOntoLeaf_`. |
 | 32 | NLDD / GPU bridge / HybridNewton / well flags | P | Well flags fine; the rest unguarded. |
 | 33 | Pinch value to one child | S | Pinch connections carried into boxes; PINCH ALL value shared over the joined child pairs. |
-| 34 | WBP / RFT for LGR wells | P | Global wells right; LGR wells' WBP read as global, RFT skipped. |
+| 34 | WBP / RFT for LGR wells | P | Global wells right; LGR wells' WBP skipped with a warning (was read from unrelated cells, segfault at np=4; sim `c04d3e78d`), RFT skipped. |
 | 35 | COMPDATL LGR ≠ WELSPECL LGR | S | Each connection resolved in its own LGR. |
 
 ### ② Aquifers, face and depth edits
@@ -262,3 +263,14 @@ gives on near-regular cells — which is why the convention story held up.
 
 The remaining 1–5 % tails in refined PORV, DX and transmissibility came from pillar placement: we
 interpolated pillar endpoints, the reference interpolates the host's corners.
+
+## Merged 2026-10-07 from the geomech stack
+
+opm-gridrefined: the mechanics coarsening (corner-point coarsening, index side, retained input
+for a second grid, cell-merging coarsening, one face between coarse cells) and consistent leaf
+global ids across ranks; `distributed_builder_test` expectation fixed (runtime_error).
+opm-simulators: `HAVE_HYPRE`, skip block vectors in refined-away cells, Cartesian dims from the
+vanguard for the LGR block checks, skip WBP for LGR wells, missing well connections reported on
+every rank (no owner-only throw). Checked: all opm-grid LGR/coarsening tests serial and np=2,3,4;
+43 SPE1 CARFIN decks identical end-of-run results to the previous binary; Drogon INIT/EGRID
+identical; refusal script clean. Detail in `COARSENING-INTO-LGR-STATUS.md` (workspace).
