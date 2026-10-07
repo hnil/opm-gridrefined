@@ -28,6 +28,12 @@
 
 #include <dune/common/parallel/mpihelper.hh>
 
+#if HAVE_OPM_COMMON
+#include <opm/input/eclipse/Deck/Deck.hpp>
+#include <opm/input/eclipse/EclipseState/EclipseState.hpp>
+#include <opm/input/eclipse/Parser/Parser.hpp>
+#endif
+
 #include <cmath>
 #include <vector>
 
@@ -306,3 +312,77 @@ BOOST_AUTO_TEST_CASE(FaultWithCrossingLayers)
     BOOST_TEST_MESSAGE("edge-conformal: " << conformal.summary());
     BOOST_CHECK(conformal.ok());
 }
+
+#if HAVE_OPM_COMMON
+// Layer 2 pinches out to the west: 0.1 m thick on average in column 0 (removed
+// by PINCH 0.5) but 2.6 m in column 1, whose west corners are only 0.2 m apart.
+// Without merging, those corners give a 0.2 m edge on the shared pillar.
+BOOST_AUTO_TEST_CASE(PinchOutLeavesNoSliverEdge)
+{
+    const auto deck = [](bool pinch) {
+        return std::string(R"(
+RUNSPEC
+DIMENS
+2 1 3 /
+OIL
+WATER
+GRID
+COORD
+  0   0 1000    0   0 1030
+100   0 1000  100   0 1030
+200   0 1000  200   0 1030
+  0 100 1000    0 100 1030
+100 100 1000  100 100 1030
+200 100 1000  200 100 1030 /
+ZCORN
+8*1000 8*1010
+8*1010 1010 1010.2 1010.2 1015 1010 1010.2 1010.2 1015
+1010 1010.2 1010.2 1015 1010 1010.2 1010.2 1015 8*1030 /
+PORO
+6*0.2 /
+PERMX
+6*100 /
+PERMY
+6*100 /
+PERMZ
+6*100 /
+)") + (pinch ? "PINCH\n0.5 /\n" : "");
+    };
+    const auto build = [](const std::string& text, Dune::CpGrid& grid) {
+        Opm::EclipseState es(Opm::Parser{}.parseString(text));
+        grid.processEclipseFormat(&es.getInputGrid(), &es, false, false, false, /*edge_conformal*/ true);
+    };
+    const auto shortEdges = [](const Dune::CpGrid& grid, double length) {
+        int count = 0;
+        for (int f = 0; f < grid.numFaces(); ++f) {
+            const int nv = grid.numFaceVertices(f);
+            for (int v = 0; v < nv; ++v) {
+                auto d = grid.vertexPosition(grid.faceVertex(f, v));
+                d -= grid.vertexPosition(grid.faceVertex(f, (v + 1) % nv));
+                count += d.two_norm() < length ? 1 : 0;
+            }
+        }
+        return count;
+    };
+    const auto volume = [](const Dune::CpGrid& grid) {
+        double sum = 0.0;
+        for (int c = 0; c < grid.numCells(); ++c) {
+            sum += grid.cellVolume(c);
+        }
+        return sum;
+    };
+
+    Dune::CpGrid input, pinched;
+    build(deck(false), input);
+    build(deck(true), pinched);
+    BOOST_CHECK_GT(shortEdges(input, 0.5), 0);
+    BOOST_CHECK_EQUAL(input.numCells(), 6);
+
+    BOOST_CHECK_EQUAL(pinched.numCells(), 5);
+    BOOST_CHECK_EQUAL(shortEdges(pinched, 0.5), 0);
+    BOOST_CHECK_CLOSE(volume(pinched), volume(input), 1e-10);
+    const auto check = Dune::cpgrid::checkGeometric(pinched);
+    BOOST_TEST_MESSAGE("pinched, edge-conformal: " << check.summary());
+    BOOST_CHECK(check.ok());
+}
+#endif
