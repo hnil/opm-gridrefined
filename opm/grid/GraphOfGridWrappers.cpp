@@ -190,21 +190,15 @@ void addWellConnections(GraphOfGrid<Dune::CpGrid>& gog,
     }
 }
 
-void addPartitionCellGroups(GraphOfGrid<Dune::CpGrid>& gog)
+std::vector<std::set<int>> partitionCellGroupsWithHalo(const Dune::CpGrid& grid)
 {
-    const auto& grid = gog.getGrid();
+    std::vector<std::set<int>> result;
     const auto& groups = grid.partitionCellGroups();
     if (groups.empty()) {
-        return;
+        return result;
     }
-    // Groups are given as global (Cartesian) cell ids; the graph uses
-    // compressed ids. Build the inverse map once, in the level-zero index
-    // space - the same space the graph vertices and WellConnections::init use
-    // (currentData().front()). This is correct both for the rank-interior path
-    // (leaf == level zero) and for refine-before-redistribute, where the leaf
-    // is refined but the partition graph and the cell groups are level-zero
-    // Cartesian cells; using the leaf globalCell/numCells there would key the
-    // groups in the leaf index space and they would not match the graph.
+    // Groups are Cartesian ids; the graph uses compressed level-zero ids, also in
+    // refine-before-redistribute where the leaf is already refined.
     const auto& level0 = *grid.currentData().front();
     const auto& cpgdim = level0.logicalCartesianSize();
     const auto& globalCell = level0.globalCell();
@@ -212,6 +206,32 @@ void addPartitionCellGroups(GraphOfGrid<Dune::CpGrid>& gog)
     for (std::size_t i = 0; i < globalCell.size(); ++i) {
         cartesian_to_compressed[globalCell[i]] = static_cast<int>(i);
     }
+
+    const int halo = grid.partitionCellGroupHalo();
+    std::vector<std::vector<int>> faceNeighbors;
+    std::vector<std::vector<int>> cellPoints;
+    std::vector<std::vector<int>> pointCells;
+    if (halo > 0) {
+        const auto view = grid.levelGridView(0);
+        const auto& index = view.indexSet();
+        faceNeighbors.resize(index.size(0));
+        cellPoints.resize(index.size(0));
+        pointCells.resize(index.size(3));
+        for (const auto& element : Dune::elements(view)) {
+            const int cell = index.index(element);
+            for (const auto& is : Dune::intersections(view, element)) {
+                if (is.neighbor()) {
+                    faceNeighbors[cell].push_back(index.index(is.outside()));
+                }
+            }
+            for (unsigned v = 0; v < element.subEntities(3); ++v) {
+                const int point = index.subIndex(element, v, 3);
+                cellPoints[cell].push_back(point);
+                pointCells[point].push_back(cell);
+            }
+        }
+    }
+
     for (const auto& group : groups) {
         std::set<int> compressed;
         for (const int cartesian : group) {
@@ -220,11 +240,39 @@ void addPartitionCellGroups(GraphOfGrid<Dune::CpGrid>& gog)
                 compressed.insert(gID);
             }
         }
-        if (!compressed.empty()) {
-            // checkIntersection = true: groups may share cells (e.g. a well
-            // crossing a refinement box); overlapping groups are merged.
-            gog.addWell(compressed, /* checkWellIntersections = */ true);
+        std::vector<int> front(compressed.begin(), compressed.end());
+        for (int layer = 0; layer < halo && !front.empty(); ++layer) {
+            std::vector<int> next;
+            const auto visit = [&](int nb) {
+                if (compressed.insert(nb).second) {
+                    next.push_back(nb);
+                }
+            };
+            for (const int cell : front) {
+                for (const int nb : faceNeighbors[cell]) {
+                    visit(nb);
+                }
+                for (const int point : cellPoints[cell]) {
+                    for (const int nb : pointCells[point]) {
+                        visit(nb);
+                    }
+                }
+            }
+            front = std::move(next);
         }
+        if (!compressed.empty()) {
+            result.push_back(std::move(compressed));
+        }
+    }
+    return result;
+}
+
+void addPartitionCellGroups(GraphOfGrid<Dune::CpGrid>& gog)
+{
+    for (auto& group : partitionCellGroupsWithHalo(gog.getGrid())) {
+        // checkIntersection = true: groups may share cells (touching boxes, or a
+        // well crossing a box); overlapping groups are merged.
+        gog.addWell(group, /* checkWellIntersections = */ true);
     }
 }
 

@@ -714,10 +714,19 @@ namespace Dune
         /// split across processes. Set before loadBalance(). Intended for
         /// LGR refinement boxes: keeping a box on one rank means the
         /// refinement builder never has to split a box across ranks
-        /// (docs/PLAN.md Track 1 step 6).
-        void setPartitionCellGroups(std::vector<std::set<int>> cellGroups)
+        /// (docs/PLAN.md Track 1 step 6). haloLayers grows each group by that
+        /// many layers of cells sharing a face or a corner, so it must be at
+        /// least the overlap the box has to stay clear of.
+        void setPartitionCellGroups(std::vector<std::set<int>> cellGroups, int haloLayers = 0)
         {
             partition_cell_groups_ = std::move(cellGroups);
+            partition_cell_group_halo_ = haloLayers;
+        }
+
+        /// \brief Layers by which the partition cell groups are grown.
+        int partitionCellGroupHalo() const
+        {
+            return partition_cell_group_halo_;
         }
 
         /// \brief The cell groups load balancing must keep together (Cartesian ids).
@@ -1546,6 +1555,7 @@ namespace Dune
          * @brief Cell groups (Cartesian ids) the partitioner must keep on one rank.
          */
         std::vector<std::set<int>> partition_cell_groups_;
+        int partition_cell_group_halo_{0};
 
     }; // end Class CpGrid
 

@@ -122,6 +122,12 @@ void addWellConnections(GraphOfGrid<Dune::CpGrid>& gog,
                         const Dune::cpgrid::WellConnections& wells,
                         bool checkWellIntersections=true);
 
+/// \brief The grid's partition cell groups in compressed level-zero ids, each grown
+/// by partitionCellGroupHalo() layers of cells sharing a face or a corner. Grown
+/// over the grid's real connections, so a neighbour across a fault or past
+/// inactive cells counts; inactive cells drop out.
+std::vector<std::set<int>> partitionCellGroupsWithHalo(const Dune::CpGrid& grid);
+
 /// \brief Contract the grid's partition cell groups into single vertices.
 ///
 /// Reads CpGrid::partitionCellGroups() (Cartesian cell-id sets the

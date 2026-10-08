@@ -33,6 +33,8 @@
 #include <boost/test/unit_test.hpp>
 
 #include <opm/grid/CpGrid.hpp>
+#include <opm/grid/GraphOfGridWrappers.hpp>
+#include <opm/grid/cpgpreprocess/preprocess.h>
 
 #include <dune/common/parallel/mpihelper.hh>
 
@@ -69,6 +71,84 @@ BOOST_AUTO_TEST_CASE(roundTrip)
     grid.setPartitionCellGroups({box});
     BOOST_REQUIRE_EQUAL(grid.partitionCellGroups().size(), 1u);
     BOOST_CHECK(grid.partitionCellGroups()[0] == box);
+}
+
+namespace
+{
+
+std::set<int> cartesianOf(const Dune::CpGrid& grid, const std::set<int>& compressed)
+{
+    std::set<int> out;
+    for (const int c : compressed) {
+        out.insert(grid.globalCell()[c]);
+    }
+    return out;
+}
+
+} // anonymous namespace
+
+BOOST_AUTO_TEST_CASE(haloGrowsGroupByLayers)
+{
+    Dune::CpGrid grid(Dune::MPIHelper::getLocalCommunicator());
+    const std::array<int, 3> dims = {{12, 12, 4}};
+    grid.createCartesian(dims, {{12.0, 12.0, 4.0}});
+    std::set<int> box;
+    for (int k = 1; k < 3; ++k) {
+        for (int j = 4; j < 7; ++j) {
+            for (int i = 4; i < 7; ++i) {
+                box.insert(i + dims[0]*j + dims[0]*dims[1]*k);
+            }
+        }
+    }
+    for (const auto& [halo, expected] : std::vector<std::pair<int,std::size_t>>{{0, 18}, {1, 5*5*4}, {2, 7*7*4}}) {
+        grid.setPartitionCellGroups({box}, halo);
+        const auto groups = Opm::partitionCellGroupsWithHalo(grid);
+        BOOST_REQUIRE_EQUAL(groups.size(), 1u);
+        BOOST_CHECK_EQUAL(groups[0].size(), expected);
+    }
+}
+
+// The halo follows real connections: across a fault thrown 3.5 layers, a box
+// cell's neighbours are several layers away in k, out of reach of an IJK halo.
+BOOST_AUTO_TEST_CASE(haloReachesAcrossFault)
+{
+    const int nx = 2, ny = 1, nz = 8;
+    std::vector<double> coord;
+    for (int j = 0; j <= ny; ++j) {
+        for (int i = 0; i <= nx; ++i) {
+            coord.insert(coord.end(), { double(i), double(j), 0.0, double(i), double(j), 20.0 });
+        }
+    }
+    std::vector<double> zcorn;
+    for (int k = 0; k < nz; ++k) {
+        for (int dk = 0; dk < 2; ++dk) {
+            for (int j = 0; j < ny; ++j) {
+                for (int dj = 0; dj < 2; ++dj) {
+                    for (int i = 0; i < nx; ++i) {
+                        for (int di = 0; di < 2; ++di) {
+                            zcorn.push_back(k + dk + (i == 1 ? 3.5 : 0.0));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    std::vector<int> actnum(nx*ny*nz, 1);
+    grdecl g;
+    g.dims[0] = nx; g.dims[1] = ny; g.dims[2] = nz;
+    g.coord = coord.data();
+    g.zcorn = zcorn.data();
+    g.actnum = actnum.data();
+
+    Dune::CpGrid grid(Dune::MPIHelper::getLocalCommunicator());
+    grid.processEclipseFormat(g, false);
+    // Box cell (0,0,5), depth 5-6: across the fault it meets (1,0,1) and (1,0,2).
+    grid.setPartitionCellGroups({{0 + nx*5}}, 1);
+    const auto groups = Opm::partitionCellGroupsWithHalo(grid);
+    BOOST_REQUIRE_EQUAL(groups.size(), 1u);
+    const auto cells = cartesianOf(grid, groups[0]);
+    BOOST_CHECK(cells.count(1 + nx*1) == 1);
+    BOOST_CHECK(cells.count(1 + nx*2) == 1);
 }
 
 BOOST_AUTO_TEST_CASE(emptyGroupsDoNotPerturbLoadBalance)
