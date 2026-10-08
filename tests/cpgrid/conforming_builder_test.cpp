@@ -123,6 +123,33 @@ double totalVolume(const Dune::CpGrid& grid)
     return vol;
 }
 
+// Every leaf face's corners wind counter-clockwise around its stored normal: the
+// polygon's area vector (sum of corner cross products) points along it.
+void checkFacesWindAroundNormal(const Dune::CpGrid& grid)
+{
+    const auto& leaf = *grid.currentData().back();
+    int inverted = 0;
+    for (int face = 0; face < leaf.numFaces(); ++face) {
+        const auto nodes = leaf.faceToPoint(face);
+        const auto count = static_cast<int>(nodes.size());
+        if (count < 3) {
+            continue;
+        }
+        Dune::FieldVector<double,3> area(0.0);
+        for (int n = 0; n < count; ++n) {
+            const auto a = Dune::cpgrid::Entity<3>(leaf, nodes[n], true).geometry().center();
+            const auto b = Dune::cpgrid::Entity<3>(leaf, nodes[(n + 1) % count], true).geometry().center();
+            area[0] += a[1]*b[2] - a[2]*b[1];
+            area[1] += a[2]*b[0] - a[0]*b[2];
+            area[2] += a[0]*b[1] - a[1]*b[0];
+        }
+        if (area.dot(leaf.faceNormals(face)) <= 0.0) {
+            ++inverted;
+        }
+    }
+    BOOST_CHECK_EQUAL(inverted, 0);
+}
+
 // Structural validity of a leaf with a faulted box boundary (phase 1): one
 // refined level, volume conserved, every cell closed (sum of area*outward-normal
 // is zero), and the box connected to coarse neighbours.
@@ -144,6 +171,7 @@ void checkValidFaultedLeaf(const Dune::CpGrid& grid, double volumeBefore)
         BOOST_CHECK_SMALL(closure.two_norm(), 1e-9);
     }
     BOOST_CHECK_GT(refinedToCoarse, 0);
+    checkFacesWindAroundNormal(grid);
 }
 
 } // anonymous namespace
@@ -573,6 +601,7 @@ void checkEveryInteriorFaceTwoSided(const Dune::CpGrid& grid)
     for (const auto& [cells, count] : pairCount) {
         BOOST_CHECK_EQUAL(count, 2);
     }
+    checkFacesWindAroundNormal(grid);
 }
 
 // ---------------------------------------------------------------------------
