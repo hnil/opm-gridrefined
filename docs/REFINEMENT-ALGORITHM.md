@@ -78,7 +78,7 @@ out.zcorn[refinedZIndex(2*ir+di, 2*jr+dj, 2*kr+dk)] = z;
 This is the **corner-point-native** refinement: refined corners lie on the
 straight sub-pillars. It coincides with the old per-hexahedron trilinear map
 **only for vertical pillars**; on inclined pillars the two differ slightly (both
-valid — this chooses ECLIPSE LGR semantics). zcorn *jumps* between columns
+valid — this chooses the reference's LGR semantics). zcorn *jumps* between columns
 (faults) and *collapses* (pinch-outs) inside the block survive automatically,
 because each child corner interpolates its 8 parent corners independently
 ([GrdeclRefinement.hpp:53-58](../opm/grid/cpgrid/refinement/GrdeclRefinement.hpp)).

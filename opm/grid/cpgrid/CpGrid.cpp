@@ -1450,7 +1450,7 @@ const Dune::FieldVector<double,3> CpGrid::faceCenterEcl(int cell_index, int face
     const bool useCellPoints = (maxLevel() == 0) || sameLevelNeighbours || isOnGridBoundary_coarseNeighboringCell;
     if (!useCellPoints) {
         // Refined face with a coarse and a refined neighbour (an LGR boundary).
-        // The ECLIPSE convention is the four-vertex average; keep it for the
+        // The reference convention is the four-vertex average; keep it for the
         // usual planar quad. But a fault on a box boundary produces non-planar
         // (skewed) or many-vertex split faces, where that average is a poor
         // centre and can collapse onto a cell centre (degenerate, zero-distance
@@ -1473,7 +1473,7 @@ const Dune::FieldVector<double,3> CpGrid::faceCenterEcl(int cell_index, int face
             if (dev <= 1e-9 * std::max(len, 1.0)) {
                 center = v[0]; center += v[1]; center += v[2]; center += v[3];
                 center /= 4.0;
-                return center;  // planar quad: unchanged ECLIPSE behaviour
+                return center;  // planar quad: unchanged reference behaviour
             }
         }
         return intersection.geometry().center();  // non-planar / many-vertex

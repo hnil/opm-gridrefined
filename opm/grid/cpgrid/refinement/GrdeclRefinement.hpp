@@ -31,7 +31,7 @@ namespace Refinement
 
 /// Corner-point (grdecl) description of one refined block, produced by
 /// refineBlock(). Dimensions are box dims times subdivision factors; coord
-/// and zcorn follow the usual ECLIPSE layouts for those dimensions.
+/// and zcorn follow the usual corner-point layouts for those dimensions.
 struct RefinedBlockGrdecl
 {
     std::array<int,3> dims{};
@@ -43,7 +43,7 @@ struct RefinedBlockGrdecl
 /// Stage 2+3 of the build pipeline (docs/DESIGN-builder.md D4): resample a
 /// block of a corner-point description onto refined sub-pillars.
 ///
-/// Semantics are corner-point-native (what ECLIPSE LGRs mean):
+/// Semantics are corner-point-native (what deck LGRs mean):
 ///  - Sub-pillars are straight lines whose endpoints interpolate the four
 ///    surrounding parent pillar endpoints bilinearly; refined pillars on
 ///    parent pillar positions reproduce the parent pillars exactly.

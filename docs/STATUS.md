@@ -26,7 +26,7 @@ minimal additive hooks. The parallel model is **rank-interior** (distribute leve
 
 ### Geometry note (precise)
 Refinement is the **corner-point-native** resampling of COORD/ZCORN (refined
-corners lie on straight sub-pillars — ECLIPSE LGR semantics), which conserves the
+corners lie on straight sub-pillars — the reference's LGR semantics), which conserves the
 parent cell's volume and volume-weighted centre of mass. The per-cell **trilinear
 map** of a hex's 8 corners refines that single cell's interior correctly for any
 hexahedron, and across a **matching, non-faulted** shared face the two neighbours'

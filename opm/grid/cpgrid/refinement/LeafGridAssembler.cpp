@@ -839,7 +839,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     // neighbour is a coarse cell, or -- when it is itself refined -- the
     // neighbour box's child cell across the fault (box<->box faulted interface,
     // LGR_GAPS A5). New split vertices join the leaf corner pool; each connection
-    // becomes a leaf face with real polygon geometry. (ECLIPSE transmissibility
+    // becomes a leaf face with real polygon geometry. (Reference-matching transmissibility
     // geometry at these faces is a separate, later layer.)
     struct SyntheticFace
     {

@@ -200,6 +200,6 @@ reference's mean; `NORNE_ATW2013` against `ECL.2014.2` for the no-LGR column.)
 ## Not investigated
 
 `RADFIN` (radial LGR) and `CARFIN`'s `NWMAX` well argument. `AMALGAM`,
-`COARSEN`. Whether ECLIPSE normalises `H*FIN` per parent cell or per box was
+`COARSEN`. Whether the reference normalises `H*FIN` per parent cell or per box was
 inferred from Norne's deck alone — it fits exactly, but only one deck was
 checked.

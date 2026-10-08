@@ -293,7 +293,7 @@ For when only a small part of the grid changes:
   the innermost cells gives a genuinely better-resolved well index (r0 scales
   with cell size); `DeckValue` CF is still apportioned by length (S6c) so deck
   totals are honoured.
-- **Out of scope:** ECLIPSE-style radial near-well LGR (a different geometry
+- **Out of scope:** reference-style radial near-well LGR (a different geometry
   class); Cartesian graded nesting is the substitute.
 
 ### S8 Verification harness (the acceptance tests)

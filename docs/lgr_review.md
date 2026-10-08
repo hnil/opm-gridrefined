@@ -192,7 +192,7 @@ Ordered by ratio of unblocked decks to effort:
 
 ## Test gate for every step
 
-A deck matrix run in CI from day one: unfaulted Cartesian, faulted, pinched, NNC, aquifer; serial and parallel; with and without wells inside the LGR; ECLIPSE reference output where licenses allow. Each short-term item above is "done" when its row of the matrix passes — this is what keeps the incremental fixes from regressing each other, given how interconnected the identification logic is.
+A deck matrix run in CI from day one: unfaulted Cartesian, faulted, pinched, NNC, aquifer; serial and parallel; with and without wells inside the LGR; reference output where licenses allow. Each short-term item above is "done" when its row of the matrix passes — this is what keeps the incremental fixes from regressing each other, given how interconnected the identification logic is.
 
 ---
 
@@ -211,7 +211,7 @@ The structure of the recommendation survives; the short-term ordering changes:
 
 In rough order of (simplification gained)/(value lost):
 
-1. **Disallow LGR patches that touch each other** (require ≥1 coarse cell of separation, or merge adjacent boxes into one). This deletes the LGR-to-LGR identification layer — `replaceLgr1CornerIdxByLgr2CornerIdx`/`...FaceIdx...`, `sharedFaceTag`, the last-appearance bookkeeping — which is among the most complex and fragile code in LgrHelpers. Value lost is small: equal subdivisions are *already* required on shared faces, so two touching boxes can usually be expressed as one larger box; and ECLIPSE itself does not allow adjacent independent LGRs (that is what AMALGAM exists for), so the restriction matches the input format's semantics anyway.
+1. **Disallow LGR patches that touch each other** (require ≥1 coarse cell of separation, or merge adjacent boxes into one). This deletes the LGR-to-LGR identification layer — `replaceLgr1CornerIdxByLgr2CornerIdx`/`...FaceIdx...`, `sharedFaceTag`, the last-appearance bookkeeping — which is among the most complex and fragile code in LgrHelpers. Value lost is small: equal subdivisions are *already* required on shared faces, so two touching boxes can usually be expressed as one larger box; and the reference simulator itself does not allow adjacent independent LGRs (that is what AMALGAM exists for), so the restriction matches the input format's semantics anyway.
 2. **Degenerate parents auto-deactivated** instead of collapse-aware refinement (Part II item 2a as the end state, not a stopgap): avoids coincident-corner merging and zero-area-face logic entirely; loses a small amount of pore volume unless compensated.
 3. **Single refinement level (no nested LGRs)**: removes the shifted-level arithmetic, `corner_history_` chains and the per-parent-grid repeated leaf rebuilds. Nested CARFIN is rare in practice — but this feature was just built and tested, so this is a "if starting fresh" observation rather than a proposal to remove it.
 4. **Conforming-only interfaces** (equal factors on shared faces — already enforced): keep forever; it is what makes the mortar machinery unnecessary.
@@ -221,7 +221,7 @@ In rough order of (simplification gained)/(value lost):
 
 - **Touching through a shared face**: supported if and only if the subdivisions match on the shared face — `compatibleSubdivisions` is checked (synchronized across ranks) and throws otherwise; covered by `lgrs_sharing_faces_test`.
 - **Touching through an edge or corner only**: *no compatibility check exists* — `patchesShareFace` detects face sharing only. The corner-identification machinery handles shared edges between equal-factor refinements; for *different* factors meeting along an edge nothing validates the situation, and duplicate coincident leaf corners are the likely outcome. Untested corner case; should either be checked or covered by a test.
-- **Overlapping boxes: not validated at all.** `validStartEndIJKs` checks only `start < end` and size consistency; the "disjoint patches" promise in the `CpGrid.hpp` documentation is not enforced anywhere. A cell inside two boxes gets assigned to whichever LGR comes last in the marking loop (`markElemAssignLevelDetectActiveLgrs` overwrites `assignRefinedLevel`), leaving the first LGR with holes, and the CARFIN local Cartesian indexing (`computeGlobalCellLgr` assumes a full box) then produces wrong local indices — i.e. **silent corruption, not an error**. ECLIPSE requires disjoint CARFINs, so a disjointness check that throws is the right fix and is cheap. This is a concrete addition to the §1 restriction list: it is the one unsupported case that fails silently rather than loudly.
+- **Overlapping boxes: not validated at all.** `validStartEndIJKs` checks only `start < end` and size consistency; the "disjoint patches" promise in the `CpGrid.hpp` documentation is not enforced anywhere. A cell inside two boxes gets assigned to whichever LGR comes last in the marking loop (`markElemAssignLevelDetectActiveLgrs` overwrites `assignRefinedLevel`), leaving the first LGR with holes, and the CARFIN local Cartesian indexing (`computeGlobalCellLgr` assumes a full box) then produces wrong local indices — i.e. **silent corruption, not an error**. The reference simulator requires disjoint CARFINs, so a disjointness check that throws is the right fix and is cheap. This is a concrete addition to the §1 restriction list: it is the one unsupported case that fails silently rather than loudly.
 - **Effect on the review**: this strengthens III.2 item 1 — a large share of the identification complexity exists precisely to serve touching refinements, while the touching cases that users actually need are largely expressible by merging boxes; and it adds one real bug-risk finding (unchecked overlap) to an implementation that otherwise fails safely.
 
 ## III.4 Putting an LGR into an existing deck — especially wells
@@ -238,7 +238,7 @@ In rough order of (simplification gained)/(value lost):
 - Keep the box at least one cell away from anything the implementation refuses: fault-split cells, pinched cells, explicit NNCs, aquifer cells — and from other boxes (III.3).
 - Choose odd nx/ny factors so the well column stays centered in refined cells (`AUTOREF` enforces odd factors for exactly this reason; CARFIN does not, so it is on the deck author).
 - Size the box so the well is interior, with a few refined cells of buffer before the LGR boundary — the boundary cells carry the coarse-fine transmissibility transition.
-- A well cannot straddle the LGR lateral boundary: it must be entirely global or entirely within one LGR (standard ECLIPSE limitation; amalgamation, which lifts it, is not supported).
+- A well cannot straddle the LGR lateral boundary: it must be entirely global or entirely within one LGR (a standard limitation of the simulators; amalgamation, which lifts it, is not supported).
 - Parallel runs: wells inside LGRs are supported with zoltanGoG partitioning (well cells kept together; covered by the distributed-LGR-with-wells tests).
 
 ---
