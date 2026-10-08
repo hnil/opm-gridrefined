@@ -79,6 +79,7 @@ macro(opm-grid_tests_hook)
       distribution_test
       test_communication_utils
       partition_cell_groups_test
+      refined_distribution_test
       distributed_builder_test
     )
 

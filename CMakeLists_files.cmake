@@ -106,6 +106,7 @@ list(APPEND TEST_SOURCE_FILES
   tests/cpgrid/lgr/global_refine_via_builder_test.cpp
   tests/cpgrid/partition_cell_groups_test.cpp
   tests/cpgrid/distributed_builder_test.cpp
+  tests/cpgrid/refined_distribution_test.cpp
   tests/cpgrid/grid_nnc.cpp
   tests/cpgrid/grid_pinch.cpp
   tests/cpgrid/orientedentitytable_test.cpp
