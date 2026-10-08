@@ -1170,6 +1170,31 @@ BOOST_AUTO_TEST_CASE(faultThrowTallerThanBoxKeepsConnections)
     BOOST_CHECK_CLOSE(areaAcrossIFace(grid, 2, 1, 3, 5), areaBefore, 1e-8);
 }
 
+// Two boxes that meet only through a throw, with in-face subdivisions that do
+// not nest: refused, rather than sealing the interface between them.
+BOOST_AUTO_TEST_CASE(boxesMeetingOnlyAcrossThrowMustNest)
+{
+    auto depth = [](int i_, int j_, int k_) {
+        (void)j_;
+        const double base = 2.0*(cellOf(k_) + sideOf(k_));
+        return (cellOf(i_) >= 2) ? base + 5.0 : base;
+    };
+    auto parent = makeVerticalPillarGrid({4, 2, 8}, depth);
+
+    Dune::CpGrid grid;
+    auto rawParent = parent.raw();
+    grid.processEclipseFormat(rawParent, false);
+
+    BuilderGuard guard(std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+        parent.dims, parent.coord, parent.zcorn, parent.actnum));
+
+    BOOST_CHECK_THROW(grid.addLgrsUpdateLeafView({{2,3,2}, {2,2,3}},
+                                                 {{0,0,6}, {2,0,3}},
+                                                 {{2,2,8}, {4,2,5}},
+                                                 {"A", "B"}),
+                      std::invalid_argument);
+}
+
 BOOST_AUTO_TEST_CASE(faultNotOnBoxBoundaryBuilds)
 {
     // Control: a fault exists (between i=0 and i=1) but the box (i=2..3) sits

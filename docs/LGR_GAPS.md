@@ -450,7 +450,7 @@ carries a reason rather than a bare "keyword not supported"
 
 | keyword | what the user is told |
 |---|---|
-| `AMALGAM` | boxes are independent; nothing can span two of them |
+| `AMALGAM` | accepted and ignored: touching boxes are always connected (opm-simulators, 2026-10-08) |
 | `COARSEN` | only refinement is implemented |
 | `COMPSEGL`, `COMPDATM` | a multisegment well cannot be completed in a refined block |
 | `LGRFREE` | refinement is static for the whole run |
@@ -544,7 +544,7 @@ the `CARFIN … ENDFIN` block stripped — and the numbers compared.
 | `SPE1CASE1_CARFIN1_MULTZ.DATA` | `MULTZ` and PINCH's `ALL` option over a box | passes |
 | `SPE1CASE1_CARFIN1_TRANZ.DATA` | a `TRANZ` modifier over a box | passes |
 | `SPE1CASE1_CARFIN_GR.DATA` | whole grid refined; wells via `WELSPECL`/`COMPDATL` | passes; 11 `B*` vectors read zero (D3c) |
-| `SPE1CASE1_CARFIN_FAULTS.DATA` | fault crossing a box boundary | passes (needs `--parsing-strictness=low` for `AMALGAM`) |
+| `SPE1CASE1_CARFIN_FAULTS.DATA` | fault crossing a box boundary | passes |
 | `SPE1CASE1_CARFIN1_NESTED.DATA` | nested box touching its parent's boundary | expected refusal |
 | `SPE1CASE1_CARFIN1_NESTED_CONTAINED.DATA` | nested box strictly inside its parent | passes |
 | `norne/NORNE_LGR_WELLS.DATA` | full field, one box per well, `COMPDATL` | passes; the showcase |

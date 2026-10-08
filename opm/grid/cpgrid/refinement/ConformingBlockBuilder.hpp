@@ -36,10 +36,9 @@ namespace Refinement
 /// The builder owns a copy of the parent corner-point description, since
 /// the grid does not reliably retain COORD/ZCORN after construction.
 ///
-/// Current restrictions (throw): serial runs; an unrefined starting grid;
-/// "GLOBAL" parents only (no nested refinement); boxes pairwise separated
-/// by at least one cell (no touching boxes); unfaulted block-boundary
-/// faces (faults *inside* blocks are supported).
+/// Restrictions (throw): an unrefined starting grid; in parallel each box must be
+/// rank-interior; boxes that touch, in IJK or across a fault, need in-face
+/// subdivisions that nest; graded boxes may not touch another box.
 class ConformingBlockBuilder : public Builder
 {
 public:

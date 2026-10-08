@@ -1005,6 +1005,18 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                         }
                         const auto& facThis = boxes[b].factors;
                         const auto& facN    = boxes[nbBox].factors;
+                        // Boxes that meet only through the throw miss the builder's
+                        // IJK-contact guard; without nesting both sides would skip.
+                        const auto nests = [u, v](const auto& fine, const auto& coarse) {
+                            return fine[u] % coarse[u] == 0 && fine[v] % coarse[v] == 0;
+                        };
+                        if (!nests(facThis, facN) && !nests(facN, facThis)) {
+                            throw std::invalid_argument(
+                                "Refinement '" + requests[b].name + "' meets '"
+                                + requests[nbBox].name + "' across a fault with in-face "
+                                "subdivisions that do not nest. Use equal subdivisions, or "
+                                "make one a multiple of the other.");
+                        }
                         if (facThis[u] == facN[u] && facThis[v] == facN[v]) {
                             if (b >= nbBox) {
                                 continue;        // equal: lower box index owns
@@ -1013,8 +1025,7 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                         else if (!(facThis[u] >= facN[u] && facThis[v] >= facN[v])) {
                             continue;            // coarser side: the finer references us
                         }
-                        // (The guard guarantees compatible + cleanly nested, so the
-                        // finer box is well-defined and facThis is a multiple of facN
+                        // (Nesting is checked above, so facThis is a multiple of facN
                         // in the in-face directions.)
                         const std::array<int,3> pijk = {
                             conn.coarseNeighborCart % dims0[0],
