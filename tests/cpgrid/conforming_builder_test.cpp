@@ -1115,6 +1115,61 @@ BOOST_AUTO_TEST_CASE(faultLargeThrowAtBoxBoundaryBuilds)
     checkValidFaultedLeaf(grid, volumeBefore);
 }
 
+namespace
+{
+
+// Face area between cells whose parent is at i = iIn, layers [k0, k1), and cells
+// whose parent is at i = iOut: the connection across a fault at an i-face.
+double areaAcrossIFace(const Dune::CpGrid& grid, int iIn, int iOut, int k0, int k1)
+{
+    const auto& dims = grid.logicalCartesianSize();
+    const auto ijk = [&dims](int cart) {
+        return std::array<int,3>{ cart % dims[0], (cart / dims[0]) % dims[1],
+                                  cart / (dims[0]*dims[1]) };
+    };
+    double area = 0.0;
+    for (const auto& element : Dune::elements(grid.leafGridView())) {
+        const auto in = ijk(grid.globalCell()[element.index()]);
+        if (in[0] != iIn || in[2] < k0 || in[2] >= k1) {
+            continue;
+        }
+        for (const auto& is : Dune::intersections(grid.leafGridView(), element)) {
+            if (is.neighbor() && ijk(grid.globalCell()[is.outside().index()])[0] == iOut) {
+                area += is.geometry().volume();
+            }
+        }
+    }
+    return area;
+}
+
+} // anonymous namespace
+
+// A throw taller than the box: the cells across the fault lie outside the box's
+// own layers, and the box must still reach them with the level-zero face area.
+BOOST_AUTO_TEST_CASE(faultThrowTallerThanBoxKeepsConnections)
+{
+    auto depth = [](int i_, int j_, int k_) {
+        (void)j_;
+        const double base = 2.0*(cellOf(k_) + sideOf(k_));
+        return (cellOf(i_) >= 2) ? base + 5.0 : base;
+    };
+    auto parent = makeVerticalPillarGrid({4, 2, 8}, depth);
+
+    Dune::CpGrid grid;
+    auto rawParent = parent.raw();
+    grid.processEclipseFormat(rawParent, false);
+    const double volumeBefore = totalVolume(grid);
+    const double areaBefore = areaAcrossIFace(grid, 2, 1, 3, 5);
+    BOOST_REQUIRE_GT(areaBefore, 0.0);
+
+    BuilderGuard guard(std::make_unique<Opm::Refinement::ConformingBlockBuilder>(
+        parent.dims, parent.coord, parent.zcorn, parent.actnum));
+
+    BOOST_REQUIRE_NO_THROW(grid.addLgrsUpdateLeafView({{2,2,2}}, {{2,0,3}}, {{4,2,5}}, {"LGR1"}));
+    checkValidFaultedLeaf(grid, volumeBefore);
+    BOOST_CHECK_CLOSE(areaAcrossIFace(grid, 2, 1, 3, 5), areaBefore, 1e-8);
+}
+
 BOOST_AUTO_TEST_CASE(faultNotOnBoxBoundaryBuilds)
 {
     // Control: a fault exists (between i=0 and i=1) but the box (i=2..3) sits

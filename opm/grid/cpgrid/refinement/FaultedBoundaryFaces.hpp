@@ -58,7 +58,10 @@ struct BoundaryConnection
 /// vector if the shell falls outside the parent grid (a domain boundary).
 ///
 /// axis in {0,1,2}; side in {-1, +1}. edgeConformal selects edge-conformal
-/// processing, matching the leaf's final edgeConformalizeLeaf pass.
+/// processing, matching the leaf's final edgeConformalizeLeaf pass. across, if
+/// given, is the inclusive parent IJK range of the cells actually across the side;
+/// the mini region grows to cover it, since a large throw puts them outside the
+/// box's own layers.
 std::vector<BoundaryConnection>
 faultedBoundaryConnections(const std::array<int,3>& parentDims,
                            const double* coord,
@@ -67,7 +70,8 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
                            const BlockRefinement& box,
                            int axis,
                            int side,
-                           bool edgeConformal);
+                           bool edgeConformal,
+                           const std::array<std::array<int,2>,3>* across = nullptr);
 
 } // namespace Refinement
 } // namespace Opm

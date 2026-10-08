@@ -633,6 +633,36 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
     // entirely (those alone look like a plain domain boundary). The whole side
     // is then rebuilt from the corner-point processor below.
     std::set<std::tuple<int,int,int>> faultedSides;
+    // Parent IJK range of the cells really across each box side, from the level-zero
+    // faces: a throw taller than the box puts them outside the box's own layers.
+    std::map<std::tuple<int,int,int>, std::array<std::array<int,2>,3>> acrossRange;
+    const auto extendAcross = [&](int b, int parent, int axis, int side) {
+        const auto row = cellToFace0[EntityRep<0>(parent, true)];
+        for (int e = 0; e < row.size(); ++e) {
+            const int face = row[e].index();
+            const enum face_tag tag = tags0.get(face);
+            if (tag == NNC_FACE || axisOf(tag) != axis || row[e].orientation() != (side > 0)) {
+                continue;
+            }
+            const auto cells = faceToCell0[EntityRep<1>(face, true)];
+            for (int q = 0; q < cells.size(); ++q) {
+                const int cell = cells[q].index();
+                if (cell == parent || cell == kRemoteCell) {
+                    continue;
+                }
+                const int cart = level0.globalCell()[cell];
+                const std::array<int,3> nijk = { cart % dims0[0],
+                                                 (cart / dims0[0]) % dims0[1],
+                                                 cart / (dims0[0]*dims0[1]) };
+                const auto key = std::make_tuple(b, axis, side);
+                auto [it, fresh] = acrossRange.try_emplace(key);
+                for (int d = 0; d < 3; ++d) {
+                    it->second[d][0] = fresh ? nijk[d] : std::min(it->second[d][0], nijk[d]);
+                    it->second[d][1] = fresh ? nijk[d] : std::max(it->second[d][1], nijk[d]);
+                }
+            }
+        }
+    };
     for (int c = 0; c < numCells0; ++c) {
         const int b = boxOfCell[c];
         if (b < 0) {
@@ -647,9 +677,13 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
                 const bool onBoundary = (side < 0)
                     ? (ijk[axis] == requests[b].startIJK[axis])
                     : (ijk[axis] == requests[b].endIJK[axis] - 1);
-                if (onBoundary && outsideNeighborOf(b, c, axis, side) == kFaultedSide) {
+                if (!onBoundary) {
+                    continue;
+                }
+                if (outsideNeighborOf(b, c, axis, side) == kFaultedSide) {
                     faultedSides.emplace(b, axis, side);
                 }
+                extendAcross(b, c, axis, side);
             }
         }
     }
@@ -913,9 +947,11 @@ assembleLeafGrid(std::vector<std::shared_ptr<CpGridData>>& storage,
         std::map<std::pair<int,int>, std::vector<BoxBoxPiece>> boxBoxGroups;
 
         for (const auto& [b, axis, side] : faultedSides) {
+            const auto rangeIt = acrossRange.find(std::make_tuple(b, axis, side));
             const auto conns = faultedBoundaryConnections(
                 parentDims, coord, zcorn, actnum, requests[b],
-                axis, side, /*edgeConformal=*/true);
+                axis, side, /*edgeConformal=*/true,
+                (rangeIt != acrossRange.end()) ? &rangeIt->second : nullptr);
             const auto& rd = boxes[b].refinedDims;
             for (const auto& conn : conns) {
                 const int refinedCart = conn.boxCell[0]

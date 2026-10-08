@@ -42,7 +42,8 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
                            const BlockRefinement& box,
                            int axis,
                            int side,
-                           bool edgeConformal)
+                           bool edgeConformal,
+                           const std::array<std::array<int,2>,3>* across)
 {
     std::vector<BoundaryConnection> result;
 
@@ -72,6 +73,10 @@ faultedBoundaryConnections(const std::array<int,3>& parentDims,
         if (p == axis) continue;
         miniStart[p] = std::max(0, miniStart[p] - 1);
         miniEnd[p]   = std::min(parentDims[p], miniEnd[p] + 1);
+        if (across) {
+            miniStart[p] = std::min(miniStart[p], (*across)[p][0]);
+            miniEnd[p]   = std::max(miniEnd[p], (*across)[p][1] + 1);
+        }
     }
 
     // The mini block keeps the box's own subdivision on the box's parent cells
